@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Silverhawk Scoring - Aplikasi penilaian lembar jawaban siswa otomatis dengan AI OCR" />
+  <title>Silverhawk Scoring</title>
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="container header-inner">
+        <div class="logo">
+          <img src="assets/favicon.svg" alt="Silverhawk" class="logo-icon" />
+          <div>
+            <h1>Silverhawk <span>Scoring</span></h1>
+            <p class="tagline">AI-Powered Answer Sheet Checker</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button id="btn-theme" class="btn-icon" title="Toggle theme">🌓</button>
+          <div id="auth-area">
+            <button id="btn-login" class="btn btn-primary">Login Google</button>
+            <div id="user-info" class="user-info hidden">
+              <img id="user-avatar" src="" alt="" class="avatar" />
+              <span id="user-name"></span>
+              <button id="btn-logout" class="btn btn-ghost btn-sm">Logout</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main -->
+    <main class="container main">
+      <!-- Status / Progress -->
+      <section id="progress-section" class="card progress-card hidden">
+        <div class="progress-header">
+          <h2 id="progress-title">Memproses...</h2>
+          <span id="progress-elapsed" class="mono">00:00</span>
+        </div>
+        <div class="progress-bar-wrap">
+          <div id="progress-bar" class="progress-bar"></div>
+        </div>
+        <p id="progress-status" class="progress-status">Menyiapkan...</p>
+      </section>
+
+      <!-- Upload Area -->
+      <section id="upload-section" class="grid-2">
+        <!-- Kunci Jawaban -->
+        <div class="card">
+          <div class="card-header">
+            <h2>🔑 Kunci Jawaban</h2>
+            <span class="badge" id="key-count">0 file</span>
+          </div>
+          <div class="upload-zone" id="key-zone" data-type="key">
+            <div class="upload-icon">📄</div>
+            <p>Drag & drop foto / PDF / ZIP kunci jawaban</p>
+            <p class="hint">atau klik untuk pilih file (multi)</p>
+            <input type="file" id="key-input" accept="image/*,.pdf,.zip" multiple hidden />
+          </div>
+          <div id="key-list" class="file-list"></div>
+          <label class="checkbox-row">
+            <input type="checkbox" id="online-key" checked />
+            <span>Cari kunci jawaban online (second opinion AI)</span>
+          </label>
+        </div>
+
+        <!-- Lembar Siswa -->
+        <div class="card">
+          <div class="card-header">
+            <h2>📝 Lembar Jawaban Siswa</h2>
+            <span class="badge" id="student-count">0 file</span>
+          </div>
+          <div class="upload-zone" id="student-zone" data-type="student">
+            <div class="upload-icon">🖼️</div>
+            <p>Drag & drop foto / PDF / ZIP lembar siswa</p>
+            <p class="hint">multi file atau 1 ZIP</p>
+            <input type="file" id="student-input" accept="image/*,.pdf,.zip" multiple hidden />
+          </div>
+          <div id="student-list" class="file-list"></div>
+        </div>
+      </section>
+
+      <!-- Meta & Options -->
+      <section class="card meta-card">
+        <h2>ℹ️ Informasi Ujian (opsional)</h2>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Nama Sekolah</label>
+            <input type="text" id="meta-school" placeholder="SMA Negeri 1 Contoh" />
+          </div>
+          <div class="form-group">
+            <label>Kelas</label>
+            <input type="text" id="meta-class" placeholder="XII IPA 1" />
+          </div>
+          <div class="form-group">
+            <label>Tanggal Ujian</label>
+            <input type="date" id="meta-date" />
+          </div>
+          <div class="form-group">
+            <label>Ruang / Mapel</label>
+            <input type="text" id="meta-room" placeholder="Ruang 3 / Matematika" />
+          </div>
+        </div>
+      </section>
+
+      <!-- Action -->
+      <div class="action-bar">
+        <button id="btn-start" class="btn btn-primary btn-lg" disabled>
+          🚀 MULAI PENILAIAN
+        </button>
+        <p class="hint" id="start-hint">Upload minimal 1 kunci jawaban & 1 lembar siswa untuk mengaktifkan tombol</p>
+      </div>
+
+      <!-- Results -->
+      <section id="results-section" class="card results-card hidden">
+        <div class="card-header">
+          <h2>📊 Hasil Penilaian</h2>
+          <div class="btn-group">
+            <button id="btn-export-pdf" class="btn btn-secondary btn-sm">📄 PDF</button>
+            <button id="btn-export-excel" class="btn btn-secondary btn-sm">📊 Excel</button>
+            <button id="btn-analysis" class="btn btn-secondary btn-sm">📈 Analisis Butir</button>
+          </div>
+        </div>
+        <div id="results-list" class="results-list"></div>
+      </section>
+
+      <!-- Analysis Modal / Section -->
+      <section id="analysis-section" class="card hidden">
+        <div class="card-header">
+          <h2>📈 Analisis Butir Soal</h2>
+          <button id="btn-close-analysis" class="btn btn-ghost btn-sm">Tutup</button>
+        </div>
+        <div id="analysis-content"></div>
+        <button id="btn-download-analysis" class="btn btn-secondary">Download Analisis</button>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="container">
+        <p>Silverhawk Scoring © 2026 • Bagian dari <a href="https://silverhawk.web.id" target="_blank">silverhawk.web.id</a></p>
+        <p class="small">Gratis untuk pendidikan. Data auto-hapus setelah 7 hari (kecuali akun berlangganan).</p>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Config Modal (first time) -->
+  <div id="config-modal" class="modal hidden">
+    <div class="modal-content">
+      <h2>⚙️ Setup Awal</h2>
+      <p>Masukkan kredensial Supabase & Gemini API Key (disimpan di localStorage browser).</p>
+      <div class="form-group">
+        <label>Supabase URL</label>
+        <input type="text" id="cfg-supabase-url" placeholder="https://xxxx.supabase.co" />
+      </div>
+      <div class="form-group">
+        <label>Supabase Anon Key</label>
+        <input type="text" id="cfg-supabase-key" placeholder="eyJ..." />
+      </div>
+      <div class="form-group">
+        <label>Gemini API Key (Google AI Studio)</label>
+        <input type="password" id="cfg-gemini-key" placeholder="AIza..." />
+      </div>
+      <div class="btn-group">
+        <button id="btn-save-config" class="btn btn-primary">Simpan & Lanjut</button>
+        <button id="btn-skip-config" class="btn btn-ghost">Lewati (demo mode)</button>
+      </div>
+      <p class="hint">Lihat README.md untuk cara mendapatkan key gratis.</p>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

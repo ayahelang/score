@@ -1,0 +1,173 @@
+/**
+ * OCR helpers – Gemini Vision (primary) + Tesseract.js (fallback)
+ */
+
+const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+
+export async function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      const base64 = result.split(',')[1];
+      resolve({ base64, mime: file.type || 'image/jpeg' });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function ocrWithGemini(file, apiKey, promptExtra = '') {
+  if (!apiKey) throw new Error('Gemini API Key belum diisi');
+
+  const { base64, mime } = await fileToBase64(file);
+
+  const prompt = `Kamu adalah sistem OCR pintar untuk lembar jawaban siswa Indonesia.
+Ekstrak SEMUA informasi penting dari gambar ini dalam format JSON murni (tanpa markdown).
+
+Struktur yang diinginkan:
+{
+  "nama": "nama siswa jika ada",
+  "kelas": "kelas jika ada",
+  "nomor_absen": "jika ada",
+  "tipe": "pg" atau "essay" atau "campuran",
+  "jawaban": [
+    { "nomor": 1, "jawaban": "A" atau teks essay },
+    { "nomor": 2, "jawaban": "..." }
+  ],
+  "teks_soal": "jika ada redaksi soal yang terbaca",
+  "catatan": "info tambahan"
+}
+
+Jika ini adalah KUNCI JAWABAN, prioritaskan ekstrak nomor soal + jawaban benar.
+${promptExtra}
+
+Hanya keluarkan JSON valid.`;
+
+  const body = {
+    contents: [{
+      parts: [
+        { text: prompt },
+        {
+          inline_data: {
+            mime_type: mime,
+            data: base64
+          }
+        }
+      ]
+    }],
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 4096
+    }
+  };
+
+  const res = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return parseJsonFromText(text);
+}
+
+export async function ocrWithTesseract(file, lang = 'ind+eng') {
+  const worker = await Tesseract.createWorker(lang);
+  const { data: { text } } = await worker.recognize(file);
+  await worker.terminate();
+  return {
+    raw_text: text,
+    nama: extractNameHeuristic(text),
+    jawaban: extractAnswersHeuristic(text)
+  };
+}
+
+function parseJsonFromText(text) {
+  // Coba ekstrak JSON dari response
+  const match = text.match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      return JSON.parse(match[0]);
+    } catch (e) {
+      console.warn('JSON parse fail', e);
+    }
+  }
+  return { raw_text: text, jawaban: [] };
+}
+
+function extractNameHeuristic(text) {
+  const m = text.match(/(?:nama|name)\s*[:\-]\s*(.+)/i);
+  return m ? m[1].trim().split('\n')[0] : null;
+}
+
+function extractAnswersHeuristic(text) {
+  const lines = text.split('\n');
+  const answers = [];
+  for (const line of lines) {
+    const m = line.match(/(\d+)\s*[\.\)\:\-]\s*([A-Ea-e].*)/);
+    if (m) {
+      answers.push({ nomor: parseInt(m[1], 10), jawaban: m[2].trim() });
+    }
+  }
+  return answers;
+}
+
+/**
+ * Proses file (image / pdf page) → OCR result
+ */
+export async function processFile(file, geminiKey, preferGemini = true) {
+  const isImage = file.type.startsWith('image/');
+  if (!isImage && !file.type.includes('pdf')) {
+    return { error: 'Tipe file tidak didukung untuk OCR langsung', file: file.name };
+  }
+
+  try {
+    if (preferGemini && geminiKey) {
+      return await ocrWithGemini(file, geminiKey);
+    }
+  } catch (e) {
+    console.warn('Gemini gagal, fallback Tesseract', e.message);
+  }
+
+  try {
+    return await ocrWithTesseract(file);
+  } catch (e) {
+    return { error: e.message, file: file.name };
+  }
+}
+
+/**
+ * Cari kunci jawaban online (second opinion) – sederhana via Gemini
+ */
+export async function searchAnswerKeyOnline(questionText, geminiKey) {
+  if (!geminiKey || !questionText) return null;
+
+  const prompt = `Berikan jawaban yang paling tepat untuk soal berikut (bisa PG atau essay singkat).
+Jawab dalam format JSON: { "jawaban": "...", "penjelasan": "singkat" }
+
+Soal:
+${questionText}`;
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.2, maxOutputTokens: 1024 }
+  };
+
+  const res = await fetch(`${GEMINI_ENDPOINT}?key=${geminiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) return null;
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return parseJsonFromText(text);
+}
