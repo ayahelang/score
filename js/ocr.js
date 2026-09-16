@@ -1,5 +1,7 @@
 /**
- * OCR helpers – Gemini Vision (primary) + Tesseract.js (fallback)
+ * OCR + AI Grading helpers
+ * Alur utama: gradeWithAI() – seperti chat manual ke guru AI
+ * (kirim soal/kunci + lembar siswa sekaligus → dapat nilai + detail)
  */
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
@@ -10,103 +12,17 @@ export async function fileToBase64(file) {
     reader.onload = () => {
       const result = reader.result;
       const base64 = result.split(',')[1];
-      resolve({ base64, mime: file.type || 'image/jpeg' });
+      let mime = file.type || 'image/jpeg';
+      if (file.name.toLowerCase().endsWith('.pdf')) mime = 'application/pdf';
+      resolve({ base64, mime, name: file.name });
     };
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
 }
 
-export async function ocrWithGemini(file, apiKey, promptExtra = '', context = 'auto') {
-  if (!apiKey) throw new Error('Gemini API Key belum diisi');
-
-  const { base64, mime } = await fileToBase64(file);
-
-  const prompt = `Kamu adalah sistem OCR ahli LEMBAR JAWABAN IMLA / tulisan tangan Arab + Latin.
-
-Dokumen khas pesantren: header sekolah, kotak "اسم الطالبة" / "اسم الطالب", "الفصل", "الدرس", lalu nomor 1-5 kalimat Arab tulisan tangan.
-
-Keluarkan HANYA JSON valid (tanpa markdown).
-
-Struktur JSON WAJIB:
-{
-  "dokumen_tipe": "lembar_siswa" | "kunci_jawaban" | "modul_ajar" | "lembar_sudah_dinilai" | "lainnya",
-  "kepercayaan_kunci": 0-100,
-  "nama": "nama dari kotak اسم الطالبة/الطالب (contoh: Adriana B., Nur Alfah). WAJIB diisi jika ada tulisan",
-  "sekolah": "header sekolah jika ada (contoh: PESANTREN MODERN AT-TAQWA)",
-  "kelas": "isi الفصل jika ada",
-  "tanggal": "tahun ajaran / tanggal jika ada",
-  "mapel": "isi الدرس atau judul (contoh: Imla)",
-  "nomor_absen": null,
-  "tipe_soal": "essay",
-  "jawaban": [
-    { "nomor": 1, "jawaban": "kalimat Arab lengkap nomor 1", "benar": null }
-  ],
-  "teks_soal": null,
-  "nilai_tertera": "nilai total dilingkari jika ada",
-  "catatan": "kualitas tulisan"
-}
-
-ATURAN KRITIS:
-1. NAMA: prioritaskan teks di samping "اسم الطالبة" atau "اسم الطالب". Jangan null jika ada tulisan.
-2. JAWABAN: transkrip Arab per nomor APA ADANYA. Jangan diterjemahkan.
-3. Jika ada nilai besar dilingkari + skor per baris → dokumen_tipe=lembar_sudah_dinilai, kepercayaan_kunci=25.
-4. Jika hanya daftar kalimat benar tanpa nama siswa → kunci_jawaban, kepercayaan_kunci=95.
-5. Lembar siswa tanpa nilai guru → lembar_siswa, kepercayaan_kunci=0.
-6. Baca tulisan tangan Arab seteliti mungkin.
-
-${promptExtra}
-
-HANYA JSON.`;
-
-  const body = {
-    contents: [{
-      parts: [
-        { text: prompt },
-        {
-          inline_data: {
-            mime_type: mime,
-            data: base64
-          }
-        }
-      ]
-    }],
-    generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 8192
-    }
-  };
-
-  const res = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini error ${res.status}: ${err}`);
-  }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return parseJsonFromText(text);
-}
-
-export async function ocrWithTesseract(file, lang = 'ind+eng') {
-  const worker = await Tesseract.createWorker(lang);
-  const { data: { text } } = await worker.recognize(file);
-  await worker.terminate();
-  return {
-    raw_text: text,
-    nama: extractNameHeuristic(text),
-    jawaban: extractAnswersHeuristic(text)
-  };
-}
-
 function parseJsonFromText(text) {
-  // Coba ekstrak JSON dari response
-  const match = text.match(/\{[\s\S]*\}/);
+  const match = text && text.match(/\{[\s\S]*\}/);
   if (match) {
     try {
       return JSON.parse(match[0]);
@@ -114,81 +30,167 @@ function parseJsonFromText(text) {
       console.warn('JSON parse fail', e);
     }
   }
-  return { raw_text: text, jawaban: [] };
-}
-
-function extractNameHeuristic(text) {
-  const m = text.match(/(?:nama|name)\s*[:\-]\s*(.+)/i);
-  return m ? m[1].trim().split('\n')[0] : null;
-}
-
-function extractAnswersHeuristic(text) {
-  const lines = text.split('\n');
-  const answers = [];
-  for (const line of lines) {
-    const m = line.match(/(\d+)\s*[\.\)\:\-]\s*([A-Ea-e].*)/);
-    if (m) {
-      answers.push({ nomor: parseInt(m[1], 10), jawaban: m[2].trim() });
-    }
-  }
-  return answers;
+  return { raw_text: text, error: 'Gagal parse JSON dari AI' };
 }
 
 /**
- * Proses file (image / pdf page) → OCR result
- * context: 'key' | 'student' | 'auto'
+ * INTI: Nilai seperti chat manual ke AI
+ * Kirim semua file soal/kunci + lembar siswa dalam 1 request multimodal.
  */
-export async function processFile(file, geminiKey, preferGemini = true, context = 'auto') {
-  const isImage = file.type.startsWith('image/');
-  if (!isImage && !file.type.includes('pdf')) {
-    return { error: 'Tipe file tidak didukung untuk OCR langsung', file: file.name };
-  }
+export async function gradeWithAI(keyFiles, studentFiles, apiKey, options = {}) {
+  if (!apiKey) throw new Error('Gemini API Key belum diisi');
+  if (!studentFiles || !studentFiles.length) throw new Error('Tidak ada lembar siswa');
 
-  try {
-    if (preferGemini && geminiKey) {
-      const extra = context === 'key'
-        ? 'Dokumen ini diupload sebagai KUNCI JAWABAN / referensi. Analisis apakah ini kunci murni, modul ajar, atau lembar siswa yang sudah dinilai.'
-        : context === 'student'
-        ? 'Dokumen ini diupload sebagai LEMBAR JAWABAN SISWA. Prioritaskan ekstrak nama siswa + jawaban per nomor.'
-        : '';
-      return await ocrWithGemini(file, geminiKey, extra, context);
+  const parts = [];
+
+  const prompt = `Kamu adalah guru penguji yang sangat teliti. Tugasmu: menilai lembar jawaban siswa berdasarkan file soal / kunci yang diberikan.
+
+CARA KERJA (sama seperti guru manusia):
+1. Baca file SOAL / KUNCI JAWABAN yang diberikan.
+2. Baca file LEMBAR JAWABAN SISWA.
+3. Ekstrak data meta: nama siswa, sekolah, kelas, tanggal, mapel.
+4. Untuk PILIHAN GANDA: tentukan jawaban benar (dari kunci jika ada, atau dari pengetahuanmu + isi soal), bandingkan dengan jawaban siswa.
+5. Untuk ESSAY: nilai berdasarkan kelengkapan, ketepatan konsep, dan kejelasan (proporsional).
+6. Hitung nilai akhir 0-100.
+
+Jika yang diupload sebagai "kunci" ternyata adalah LEMBAR SOAL (bukan kunci jawaban), gunakan pengetahuanmu sebagai guru + isi soal untuk menentukan jawaban yang benar, lalu nilai lembar siswa.
+
+Keluarkan HANYA JSON valid (tanpa markdown) dengan struktur:
+
+{
+  "meta": {
+    "sekolah": "...",
+    "kelas": "...",
+    "tanggal": "...",
+    "mapel": "...",
+    "catatan": "opsional"
+  },
+  "siswa": [
+    {
+      "nama": "nama siswa dari lembar",
+      "kelas": "kelas jika ada",
+      "file": "nama file jika diketahui",
+      "score": 75,
+      "correct": 4,
+      "total": 8,
+      "details": [
+        {
+          "nomor": "1",
+          "tipe": "pg",
+          "siswa": "jawaban siswa",
+          "kunci": "jawaban benar",
+          "benar": true,
+          "skor_butir": 100,
+          "catatan": "opsional"
+        }
+      ]
     }
-  } catch (e) {
-    console.warn('Gemini gagal, fallback Tesseract', e.message);
-  }
-
-  try {
-    return await ocrWithTesseract(file);
-  } catch (e) {
-    return { error: e.message, file: file.name };
-  }
+  ],
+  "missing": ["daftar data yang dicari tapi tidak ditemukan"],
+  "ringkasan": "1-2 kalimat ringkasan penilaian"
 }
 
-/**
- * Cari kunci jawaban online (second opinion) – sederhana via Gemini
- */
-export async function searchAnswerKeyOnline(questionText, geminiKey) {
-  if (!geminiKey || !questionText) return null;
+${options.onlineKey ? 'Gunakan juga pengetahuanmu sebagai second opinion untuk kunci jawaban.' : ''}
+${options.extra || ''}
 
-  const prompt = `Berikan jawaban yang paling tepat untuk soal berikut (bisa PG atau essay singkat).
-Jawab dalam format JSON: { "jawaban": "...", "penjelasan": "singkat" }
+HANYA JSON.`;
 
-Soal:
-${questionText}`;
+  parts.push({ text: prompt });
+
+  for (const f of (keyFiles || [])) {
+    const { base64, mime, name } = await fileToBase64(f);
+    parts.push({ text: '\\n--- FILE KUNCI/SOAL: ' + name + ' ---\\n' });
+    parts.push({ inline_data: { mime_type: mime, data: base64 } });
+  }
+
+  for (const f of (studentFiles || [])) {
+    const { base64, mime, name } = await fileToBase64(f);
+    parts.push({ text: '\\n--- FILE LEMBAR SISWA: ' + name + ' ---\\n' });
+    parts.push({ inline_data: { mime_type: mime, data: base64 } });
+  }
 
   const body = {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.2, maxOutputTokens: 1024 }
+    contents: [{ parts }],
+    generationConfig: {
+      temperature: 0.15,
+      maxOutputTokens: 8192
+    }
   };
 
-  const res = await fetch(`${GEMINI_ENDPOINT}?key=${geminiKey}`, {
+  const res = await fetch(GEMINI_ENDPOINT + '?key=' + apiKey, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   });
 
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error('Gemini error ' + res.status + ': ' + err.slice(0, 300));
+  }
+
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return parseJsonFromText(text);
+  const parsed = parseJsonFromText(text);
+
+  if (parsed.error && !parsed.siswa) {
+    throw new Error('AI tidak mengembalikan hasil penilaian yang valid. Coba lagi atau periksa file.');
+  }
+
+  return parsed;
+}
+
+export async function ocrWithGemini(file, apiKey, promptExtra = '') {
+  if (!apiKey) throw new Error('Gemini API Key belum diisi');
+  const { base64, mime } = await fileToBase64(file);
+
+  const prompt = 'Ekstrak data dari dokumen pendidikan ini sebagai JSON:\\n' +
+    '{"nama":null,"sekolah":null,"kelas":null,"tanggal":null,"mapel":null,' +
+    '"jawaban":[{"nomor":1,"jawaban":"..."}],"dokumen_tipe":"lembar_siswa","kepercayaan_kunci":0}\\n' +
+    promptExtra + '\\nHanya JSON.';
+
+  const body = {
+    contents: [{
+      parts: [
+        { text: prompt },
+        { inline_data: { mime_type: mime, data: base64 } }
+      ]
+    }],
+    generationConfig: { temperature: 0.1, maxOutputTokens: 4096 }
+  };
+
+  const res = await fetch(GEMINI_ENDPOINT + '?key=' + apiKey, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error('Gemini ' + res.status);
+  const data = await res.json();
+  return parseJsonFromText(data?.candidates?.[0]?.content?.parts?.[0]?.text || '');
+}
+
+export async function processFile(file, geminiKey, preferGemini = true, context = 'auto') {
+  try {
+    if (preferGemini && geminiKey) {
+      return await ocrWithGemini(file, geminiKey, context === 'key' ? 'Ini file kunci/soal.' : 'Ini lembar siswa.');
+    }
+  } catch (e) {
+    console.warn('OCR gagal', e.message);
+  }
+  return { nama: null, jawaban: [], error: 'OCR gagal', file: file.name };
+}
+
+export async function searchAnswerKeyOnline(questionText, geminiKey) {
+  if (!geminiKey || !questionText) return null;
+  const body = {
+    contents: [{ parts: [{ text: 'Berikan kunci jawaban singkat untuk:\\n' + questionText + '\\nJSON: {"jawaban":[{"nomor":1,"jawaban":"..."}]}' }] }],
+    generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
+  };
+  const res = await fetch(GEMINI_ENDPOINT + '?key=' + geminiKey, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return parseJsonFromText(data?.candidates?.[0]?.content?.parts?.[0]?.text || '');
 }

@@ -1,5 +1,5 @@
 import { initSupabase, getSupabase, signInWithGoogle, signOut, getSession, onAuthStateChange } from './supabase.js';
-import { processFile, searchAnswerKeyOnline } from './ocr.js';
+import { processFile, searchAnswerKeyOnline, gradeWithAI } from './ocr.js';
 import { scoreStudent, analyzeItems } from './scoring.js';
 import { exportToPDF, exportToExcel, exportAnalysisPDF } from './export.js';
 import { formatTime, extractFilesFromZip, saveConfig, loadConfig } from './utils.js';
@@ -302,6 +302,8 @@ async function startScoring() {
   state.scored = [];
   state.keyResults = [];
   state.studentResults = [];
+  state.extractedMeta = { school: null, class: null, date: null, room: null };
+  state.missingReport = [];
   updateStartButton();
 
   const progressSec = $('#progress-section');
@@ -309,8 +311,6 @@ async function startScoring() {
   progressSec.classList.remove('hidden');
   resultsSec.classList.add('hidden');
   $('#analysis-section').classList.add('hidden');
-
-  // Scroll ke progress supaya user langsung melihat
   progressSec.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
   state.startTime = Date.now();
@@ -320,7 +320,6 @@ async function startScoring() {
     if (el) el.textContent = formatTime(elapsed);
   }, 400);
 
-  // setProgress async supaya browser sempat repaint (progress bar & teks terlihat real-time)
   const setProgress = async (pct, status) => {
     const bar = $('#progress-bar');
     const statusEl = $('#progress-status');
@@ -328,73 +327,83 @@ async function startScoring() {
     if (bar) bar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
     if (statusEl) statusEl.textContent = status;
     if (titleEl) titleEl.textContent = pct >= 100 ? 'Selesai!' : 'Sedang memproses...';
-    // Yield ke event loop agar UI update terlihat
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise(r => setTimeout(r, 40));
   };
 
   try {
-    // 1. OCR Kunci Jawaban
-    await setProgress(3, 'Menyiapkan pembacaan kunci jawaban / modul...');
-    for (let i = 0; i < state.keyFiles.length; i++) {
-      const f = state.keyFiles[i];
-      const pct = 5 + ((i + 0.5) / Math.max(state.keyFiles.length, 1)) * 28;
-      await setProgress(pct, `OCR kunci (${i + 1}/${state.keyFiles.length}): ${f.name}`);
-      const result = await processFile(f, state.geminiKey, true, 'key');
-      state.keyResults.push(result);
-      await setProgress(5 + ((i + 1) / Math.max(state.keyFiles.length, 1)) * 28, `Selesai OCR kunci: ${f.name}`);
+    if (!state.geminiKey) {
+      throw new Error('Gemini API Key belum diisi. Buka setup (hapus localStorage config atau isi ulang) lalu masukkan API key.');
     }
 
-    // Merge key answers (dengan filter kepercayaan)
-    await setProgress(35, 'Menggabungkan kunci jawaban...');
-    const mergedKey = mergeKeyResults(state.keyResults);
+    await setProgress(5, 'Menyiapkan file untuk AI guru...');
+    await setProgress(15, `Mengirim ${state.keyFiles.length} file soal/kunci + ${state.studentFiles.length} lembar siswa ke AI...`);
+    await setProgress(25, 'AI sedang membaca soal & lembar jawaban (seperti guru)...');
 
-    // Auto-isi meta dari hasil OCR jika user tidak mengisi
-    autoFillMetaFromResults([...state.keyResults]);
+    const online = !!$('#online-key')?.checked;
+    const aiResult = await gradeWithAI(state.keyFiles, state.studentFiles, state.geminiKey, {
+      onlineKey: online,
+      extra: 'Nilai secara adil. Untuk PG gunakan kunci atau pengetahuan biologi/mapel. Untuk essay nilai proporsional.'
+    });
 
-    // 2. Online second opinion (optional)
-    let onlineKey = null;
-    if ($('#online-key')?.checked && state.geminiKey) {
-      await setProgress(38, 'Mencari second opinion kunci online (AI)...');
-      const sampleQ = state.keyResults.find(r => r.teks_soal)?.teks_soal ||
-        (mergedKey.jawaban?.[0] ? `Soal nomor ${mergedKey.jawaban[0].nomor}` : null);
-      if (sampleQ) {
-        onlineKey = await searchAnswerKeyOnline(sampleQ, state.geminiKey);
-      }
-      await setProgress(42, 'Second opinion selesai');
+    await setProgress(80, 'Menyusun hasil penilaian...');
+
+    // Map hasil AI ke state aplikasi
+    const meta = aiResult.meta || {};
+    state.extractedMeta = {
+      school: meta.sekolah || null,
+      class: meta.kelas || null,
+      date: meta.tanggal || null,
+      room: meta.mapel || null
+    };
+    // Auto-isi form jika kosong
+    if (state.extractedMeta.school && !$('#meta-school').value) $('#meta-school').value = state.extractedMeta.school;
+    if (state.extractedMeta.class && !$('#meta-class').value) $('#meta-class').value = state.extractedMeta.class;
+    if (state.extractedMeta.date && !$('#meta-date').value) {
+      const d = tryParseDate(state.extractedMeta.date);
+      if (d) $('#meta-date').value = d;
+    }
+    if (state.extractedMeta.room && !$('#meta-room').value) $('#meta-room').value = state.extractedMeta.room;
+
+    state.missingReport = Array.isArray(aiResult.missing) ? aiResult.missing : [];
+
+    const siswaList = Array.isArray(aiResult.siswa) ? aiResult.siswa : [];
+    state.studentResults = siswaList.map((s, i) => ({
+      nama: s.nama || 'Tanpa Nama',
+      kelas: s.kelas || '',
+      jawaban: (s.details || []).map(d => ({ nomor: d.nomor, jawaban: d.siswa })),
+      _fileHint: s.file || (state.studentFiles[i] && state.studentFiles[i].name.replace(/\.[^.]+$/, '')) || ''
+    }));
+
+    state.scored = siswaList.map((s, i) => ({
+      nama: s.nama || 'Tanpa Nama',
+      kelas: s.kelas || '',
+      score: typeof s.score === 'number' ? s.score : 0,
+      correct: s.correct || 0,
+      total: s.total || (s.details || []).length || 1,
+      details: (s.details || []).map(d => ({
+        nomor: d.nomor,
+        siswa: d.siswa || '-',
+        kunci: d.kunci || '-',
+        benar: !!d.benar,
+        tipe: d.tipe || 'pg',
+        catatan: d.catatan || ''
+      }))
+    }));
+
+    // Jika AI tidak mengembalikan siswa sama sekali, fallback pesan
+    if (state.scored.length === 0) {
+      state.scored = [{
+        nama: 'Tanpa Nama',
+        kelas: '',
+        score: 0,
+        correct: 0,
+        total: 1,
+        details: [{ nomor: '-', siswa: '-', kunci: aiResult.ringkasan || aiResult.raw_text || 'AI tidak menemukan jawaban', benar: false }]
+      }];
+      state.missingReport.push('Hasil penilaian AI kosong – coba upload ulang atau periksa API key');
     }
 
-    // 3. OCR Lembar Siswa
-    await setProgress(45, 'Mulai membaca lembar jawaban siswa...');
-    for (let i = 0; i < state.studentFiles.length; i++) {
-      const f = state.studentFiles[i];
-      const pct = 45 + ((i + 0.5) / Math.max(state.studentFiles.length, 1)) * 40;
-      await setProgress(pct, `OCR siswa (${i + 1}/${state.studentFiles.length}): ${f.name}`);
-      const result = await processFile(f, state.geminiKey, true, 'student');
-      // Jangan pakai nama file sebagai nama siswa, kecuali OCR benar-benar kosong
-      const ocrName = (result.nama || '').toString().trim();
-      if (!ocrName || ocrName.toLowerCase() === 'null' || ocrName === '-' || ocrName === 'undefined') {
-        result.nama = 'Tanpa Nama';
-        result._fileHint = f.name.replace(/\.[^.]+$/, '');
-      } else {
-        result.nama = ocrName;
-      }
-      state.studentResults.push(result);
-      await setProgress(45 + ((i + 1) / Math.max(state.studentFiles.length, 1)) * 40, `Selesai OCR siswa: ${f.name}`);
-    }
-
-    // Auto-isi meta lagi dari data siswa (jika masih kosong)
-    autoFillMetaFromResults(state.studentResults);
-
-    // Simpan meta hasil scan + laporan data yang tidak ditemukan
-    state.extractedMeta = extractMetaFromResults([...state.keyResults, ...state.studentResults]);
-    state.missingReport = buildMissingReport([...state.keyResults, ...state.studentResults]);
-
-    // 4. Scoring
-    await setProgress(90, 'Menghitung nilai siswa...');
-    state.scored = state.studentResults.map(st => scoreStudent(st, mergedKey, onlineKey));
-
-    await setProgress(98, 'Menyiapkan tampilan hasil...');
-    await setProgress(100, 'Selesai! Menampilkan hasil...');
+    await setProgress(100, aiResult.ringkasan || 'Selesai! Menampilkan hasil...');
     await new Promise(r => setTimeout(r, 500));
 
     renderResults();
