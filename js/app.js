@@ -370,7 +370,14 @@ async function startScoring() {
       const pct = 45 + ((i + 0.5) / Math.max(state.studentFiles.length, 1)) * 40;
       await setProgress(pct, `OCR siswa (${i + 1}/${state.studentFiles.length}): ${f.name}`);
       const result = await processFile(f, state.geminiKey, true, 'student');
-      if (!result.nama) result.nama = f.name.replace(/\.[^.]+$/, '');
+      // Jangan pakai nama file sebagai nama siswa, kecuali OCR benar-benar kosong
+      const ocrName = (result.nama || '').toString().trim();
+      if (!ocrName || ocrName.toLowerCase() === 'null' || ocrName === '-' || ocrName === 'undefined') {
+        result.nama = 'Tanpa Nama';
+        result._fileHint = f.name.replace(/\.[^.]+$/, '');
+      } else {
+        result.nama = ocrName;
+      }
       state.studentResults.push(result);
       await setProgress(45 + ((i + 1) / Math.max(state.studentFiles.length, 1)) * 40, `Selesai OCR siswa: ${f.name}`);
     }
@@ -503,7 +510,6 @@ function renderResults() {
   const meta = getMeta();
   const missing = state.missingReport || [];
 
-  // Ringkasan info ujian (dari isian user atau hasil scan)
   const metaRows = [
     { label: 'Sekolah', value: meta.school },
     { label: 'Kelas', value: meta.class },
@@ -535,11 +541,16 @@ function renderResults() {
     </div>
   `;
 
-  const studentsHtml = state.scored.map((r, idx) => `
+  const studentsHtml = state.scored.map((r, idx) => {
+    const src = state.studentResults[idx] || {};
+    const nameDisplay = (r.nama === 'Tanpa Nama' && src._fileHint)
+      ? `Tanpa Nama <span class="hint">(file: ${escapeHtml(src._fileHint)})</span>`
+      : escapeHtml(r.nama || 'Tanpa Nama');
+    return `
     <div class="result-item" data-idx="${idx}">
       <div class="result-header">
         <div>
-          <span class="result-name">${escapeHtml(r.nama)}</span>
+          <span class="result-name">${nameDisplay}</span>
           ${r.kelas ? `<span class="hint"> • ${escapeHtml(r.kelas)}</span>` : ''}
         </div>
         <span class="result-score">${r.score}</span>
@@ -548,18 +559,18 @@ function renderResults() {
         <div class="qa-row" style="font-weight:600;color:var(--text-muted)">
           <span>No</span><span>Jawaban Siswa</span><span>Kunci / Status</span>
         </div>
-        ${r.details.map(d => `
+        ${(r.details || []).map(d => `
           <div class="qa-row">
             <span class="qa-num">${d.nomor}</span>
-            <span>${escapeHtml(String(d.siswa || '-'))}</span>
-            <span class="${d.benar ? 'qa-correct' : 'qa-wrong'}">
+            <span dir="auto">${escapeHtml(String(d.siswa || '-'))}</span>
+            <span class="${d.benar ? 'qa-correct' : 'qa-wrong'}" dir="auto">
               ${escapeHtml(String(d.kunci || '-'))} ${d.benar ? '✓' : '✗'}
             </span>
           </div>
         `).join('')}
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 
   list.innerHTML = metaHtml + studentsHtml;
 

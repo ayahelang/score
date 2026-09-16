@@ -22,43 +22,42 @@ export async function ocrWithGemini(file, apiKey, promptExtra = '', context = 'a
 
   const { base64, mime } = await fileToBase64(file);
 
-  const prompt = `Kamu adalah sistem OCR + analisis dokumen pendidikan yang sangat ahli membaca TULISAN TANGAN (bahasa Indonesia, Arab, Inggris, dan campuran).
+  const prompt = `Kamu adalah sistem OCR ahli LEMBAR JAWABAN IMLA / tulisan tangan Arab + Latin.
 
-Dokumen bisa berupa foto lembar jawaban siswa, kunci jawaban, modul ajar, atau LJK. Tulisan sering tidak rapi, miring, atau berbahasa Arab.
+Dokumen khas pesantren: header sekolah, kotak "اسم الطالبة" / "اسم الطالب", "الفصل", "الدرس", lalu nomor 1-5 kalimat Arab tulisan tangan.
 
-Analisis gambar/dokumen ini dan keluarkan HANYA JSON valid (tanpa markdown, tanpa teks di luar JSON).
+Keluarkan HANYA JSON valid (tanpa markdown).
 
-Struktur JSON yang WAJIB diikuti:
+Struktur JSON WAJIB:
 {
   "dokumen_tipe": "lembar_siswa" | "kunci_jawaban" | "modul_ajar" | "lembar_sudah_dinilai" | "lainnya",
   "kepercayaan_kunci": 0-100,
-  "nama": "nama siswa jika ada (boleh Arab/Latin), null jika tidak",
-  "sekolah": "nama sekolah jika terbaca, null jika tidak",
-  "kelas": "kelas jika ada, null jika tidak",
-  "tanggal": "tanggal ujian jika ada (format bebas), null jika tidak",
-  "mapel": "mata pelajaran / ruang jika ada, null jika tidak",
-  "nomor_absen": "jika ada",
-  "tipe_soal": "pg" | "essay" | "campuran",
+  "nama": "nama dari kotak اسم الطالبة/الطالب (contoh: Adriana B., Nur Alfah). WAJIB diisi jika ada tulisan",
+  "sekolah": "header sekolah jika ada (contoh: PESANTREN MODERN AT-TAQWA)",
+  "kelas": "isi الفصل jika ada",
+  "tanggal": "tahun ajaran / tanggal jika ada",
+  "mapel": "isi الدرس atau judul (contoh: Imla)",
+  "nomor_absen": null,
+  "tipe_soal": "essay",
   "jawaban": [
-    { "nomor": 1, "jawaban": "teks jawaban apa adanya (Arab/Latin/angka/huruf)", "benar": true/false/null }
+    { "nomor": 1, "jawaban": "kalimat Arab lengkap nomor 1", "benar": null }
   ],
-  "teks_soal": "redaksi soal jika terbaca (boleh ringkas)",
-  "nilai_tertera": "nilai yang sudah ditulis guru (jika lembar sudah dinilai), null jika tidak",
-  "catatan": "info penting lain (bahasa dominan, kualitas tulisan, dll)"
+  "teks_soal": null,
+  "nilai_tertera": "nilai total dilingkari jika ada",
+  "catatan": "kualitas tulisan"
 }
 
-ATURAN PENTING:
-1. Baca tulisan tangan sebaik mungkin. Jangan mengarang jawaban yang tidak terbaca.
-2. Jika teks berbahasa Arab, transkripsikan tetap dalam Arab (jangan diterjemahkan).
-3. Jika LEMBAR JAWABAN SISWA YANG SUDAH DINILAI (ada nilai besar dilingkari, coretan guru, tapi TIDAK ada tanda ✓/✗ atau kunci jelas per nomor) → dokumen_tipe = "lembar_sudah_dinilai", kepercayaan_kunci = 20-40. JANGAN anggap 100% sebagai kunci.
-4. Jika MODUL AJAR / kunci jawaban jelas → dokumen_tipe = "modul_ajar" atau "kunci_jawaban", kepercayaan_kunci = 90-100.
-5. Jika KUNCI JAWABAN murni → kepercayaan_kunci = 85-100.
-6. Jika LEMBAR SISWA belum dinilai → dokumen_tipe = "lembar_siswa", kepercayaan_kunci = 0.
-7. Ekstrak meta (sekolah, kelas, tanggal, mapel, nama) sejauh yang terbaca.
+ATURAN KRITIS:
+1. NAMA: prioritaskan teks di samping "اسم الطالبة" atau "اسم الطالب". Jangan null jika ada tulisan.
+2. JAWABAN: transkrip Arab per nomor APA ADANYA. Jangan diterjemahkan.
+3. Jika ada nilai besar dilingkari + skor per baris → dokumen_tipe=lembar_sudah_dinilai, kepercayaan_kunci=25.
+4. Jika hanya daftar kalimat benar tanpa nama siswa → kunci_jawaban, kepercayaan_kunci=95.
+5. Lembar siswa tanpa nilai guru → lembar_siswa, kepercayaan_kunci=0.
+6. Baca tulisan tangan Arab seteliti mungkin.
 
 ${promptExtra}
 
-Keluarkan HANYA JSON.`;
+HANYA JSON.`;
 
   const body = {
     contents: [{

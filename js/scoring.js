@@ -80,22 +80,66 @@ export function scoreStudent(studentData, keyData, onlineKey = null) {
   };
 }
 
+function normalizeArabic(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/[\u064B-\u065F\u0670]/g, '') // hapus harakat
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/[ـ\s]+/g, ' ')
+    .trim();
+}
+
+function similarityRatio(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const longer = a.length > b.length ? a : b;
+  const shorter = a.length > b.length ? b : a;
+  if (longer.length === 0) return 1;
+  // Levenshtein sederhana
+  const rows = shorter.length + 1;
+  const cols = longer.length + 1;
+  const dist = Array.from({ length: rows }, () => new Array(cols).fill(0));
+  for (let i = 0; i < rows; i++) dist[i][0] = i;
+  for (let j = 0; j < cols; j++) dist[0][j] = j;
+  for (let i = 1; i < rows; i++) {
+    for (let j = 1; j < cols; j++) {
+      const cost = shorter[i - 1] === longer[j - 1] ? 0 : 1;
+      dist[i][j] = Math.min(
+        dist[i - 1][j] + 1,
+        dist[i][j - 1] + 1,
+        dist[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return 1 - dist[shorter.length][longer.length] / longer.length;
+}
+
 function isAnswerMatch(siswa, kunci) {
   if (!siswa || !kunci) return false;
+
+  // PG Latin
   const s = normalizeAnswer(siswa);
   const k = normalizeAnswer(kunci);
-  if (s === k) return true;
+  if (s && k && s === k && s.length <= 2) return true;
 
-  // Essay sederhana: cek substring / similarity kasar
-  const sLower = String(siswa).toLowerCase();
-  const kLower = String(kunci).toLowerCase();
-  if (sLower.includes(kLower) || kLower.includes(sLower)) return true;
+  // Essay / Imla Arab + Latin
+  const sNorm = normalizeArabic(siswa).toLowerCase();
+  const kNorm = normalizeArabic(kunci).toLowerCase();
+  if (!sNorm || !kNorm) return false;
+  if (sNorm === kNorm) return true;
+  if (sNorm.includes(kNorm) || kNorm.includes(sNorm)) return true;
 
-  // Simple word overlap
-  const sWords = new Set(sLower.split(/\s+/).filter(w => w.length > 2));
-  const kWords = kLower.split(/\s+/).filter(w => w.length > 2);
+  // Similarity karakter (cocok untuk imla Arab yang mirip)
+  const sim = similarityRatio(sNorm.replace(/\s/g, ''), kNorm.replace(/\s/g, ''));
+  if (sim >= 0.72) return true;
+
+  // Word overlap
+  const sWords = new Set(sNorm.split(/\s+/).filter(w => w.length > 1));
+  const kWords = kNorm.split(/\s+/).filter(w => w.length > 1);
   const overlap = kWords.filter(w => sWords.has(w)).length;
-  if (kWords.length > 0 && overlap / kWords.length >= 0.6) return true;
+  if (kWords.length > 0 && overlap / kWords.length >= 0.55) return true;
 
   return false;
 }
