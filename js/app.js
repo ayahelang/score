@@ -16,7 +16,9 @@ const state = {
   config: {},
   processing: false,
   startTime: 0,
-  timerInterval: null
+  timerInterval: null,
+  extractedMeta: { school: null, class: null, date: null, room: null },
+  missingReport: []
 };
 
 // DOM refs
@@ -55,15 +57,26 @@ function setupTheme() {
   });
 }
 
-function setupConfigModal() {
-  // Pastikan field meta kosong & anti-autofill
+function clearMetaFields() {
   ['meta-school', 'meta-class', 'meta-date', 'meta-room'].forEach(id => {
     const el = document.getElementById(id);
     if (el) {
       el.value = '';
+      el.defaultValue = '';
+      // Cegah browser autofill mengisi key ke field ini
       el.setAttribute('autocomplete', 'off');
+      el.setAttribute('data-lpignore', 'true');
+      el.setAttribute('data-form-type', 'other');
     }
   });
+}
+
+function setupConfigModal() {
+  // Bersihkan field meta saat load (melawan browser autofill yang mengisi key)
+  clearMetaFields();
+  setTimeout(clearMetaFields, 150);
+  setTimeout(clearMetaFields, 600);
+  setTimeout(clearMetaFields, 1500);
 
   $('#btn-save-config')?.addEventListener('click', () => {
     const url = $('#cfg-supabase-url').value.trim();
@@ -75,12 +88,15 @@ function setupConfigModal() {
     state.geminiKey = gemini;
     if (url && key) initSupabase(url, key);
     $('#config-modal').classList.add('hidden');
+    // Pastikan meta tidak ikut terisi setelah simpan config
+    clearMetaFields();
     checkAuth();
   });
 
   $('#btn-skip-config')?.addEventListener('click', () => {
     saveConfig({ skipped: true });
     $('#config-modal').classList.add('hidden');
+    clearMetaFields();
   });
 }
 
@@ -243,12 +259,41 @@ function setupButtons() {
 }
 
 function getMeta() {
+  // Prioritas: isian user → hasil scan OCR
   return {
-    school: $('#meta-school')?.value || '',
-    class: $('#meta-class')?.value || '',
-    date: $('#meta-date')?.value || '',
-    room: $('#meta-room')?.value || ''
+    school: $('#meta-school')?.value?.trim() || state.extractedMeta.school || '',
+    class: $('#meta-class')?.value?.trim() || state.extractedMeta.class || '',
+    date: $('#meta-date')?.value?.trim() || state.extractedMeta.date || '',
+    room: $('#meta-room')?.value?.trim() || state.extractedMeta.room || ''
   };
+}
+
+function buildMissingReport(allResults) {
+  const missing = [];
+  const hasSchool = allResults.some(r => r.sekolah);
+  const hasClass = allResults.some(r => r.kelas);
+  const hasDate = allResults.some(r => r.tanggal);
+  const hasMapel = allResults.some(r => r.mapel);
+  const hasNama = allResults.some(r => r.nama && r.nama !== 'Tanpa Nama');
+  const hasJawaban = allResults.some(r => (r.jawaban || []).length > 0);
+
+  if (!hasSchool) missing.push('Nama sekolah');
+  if (!hasClass) missing.push('Kelas');
+  if (!hasDate) missing.push('Tanggal ujian');
+  if (!hasMapel) missing.push('Mata pelajaran / Ruang');
+  if (!hasNama) missing.push('Nama siswa (beberapa file)');
+  if (!hasJawaban) missing.push('Daftar jawaban per nomor');
+
+  // Cek apakah ada kunci yang valid
+  const goodKeys = (state.keyResults || []).filter(r =>
+    (r.kepercayaan_kunci || 0) >= 50 ||
+    ['kunci_jawaban', 'modul_ajar'].includes(r.dokumen_tipe)
+  );
+  if (goodKeys.length === 0 && (state.keyResults || []).length > 0) {
+    missing.push('Kunci jawaban yang jelas (file yang diupload sebagai kunci kemungkinan hanya lembar sudah dinilai)');
+  }
+
+  return missing;
 }
 
 async function startScoring() {
@@ -332,6 +377,10 @@ async function startScoring() {
 
     // Auto-isi meta lagi dari data siswa (jika masih kosong)
     autoFillMetaFromResults(state.studentResults);
+
+    // Simpan meta hasil scan + laporan data yang tidak ditemukan
+    state.extractedMeta = extractMetaFromResults([...state.keyResults, ...state.studentResults]);
+    state.missingReport = buildMissingReport([...state.keyResults, ...state.studentResults]);
 
     // 4. Scoring
     await setProgress(90, 'Menghitung nilai siswa...');
@@ -451,7 +500,42 @@ function renderResults() {
   const list = $('#results-list');
   if (!list) return;
 
-  list.innerHTML = state.scored.map((r, idx) => `
+  const meta = getMeta();
+  const missing = state.missingReport || [];
+
+  // Ringkasan info ujian (dari isian user atau hasil scan)
+  const metaRows = [
+    { label: 'Sekolah', value: meta.school },
+    { label: 'Kelas', value: meta.class },
+    { label: 'Tanggal', value: meta.date },
+    { label: 'Ruang / Mapel', value: meta.room }
+  ];
+
+  const metaHtml = `
+    <div class="meta-summary" style="margin-bottom:1rem;padding:0.85rem 1rem;background:var(--bg-elevated);border-radius:10px;border:1px solid var(--border);">
+      <div style="font-weight:600;margin-bottom:0.5rem;color:var(--accent);">📋 Informasi Ujian</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.4rem 1rem;font-size:0.9rem;">
+        ${metaRows.map(m => `
+          <div>
+            <span style="color:var(--text-muted);">${m.label}:</span>
+            <strong>${m.value ? escapeHtml(m.value) : '<span style="color:var(--warning);font-weight:500;">Tidak ditemukan di file</span>'}</strong>
+          </div>
+        `).join('')}
+      </div>
+      ${missing.length ? `
+        <div style="margin-top:0.75rem;padding-top:0.65rem;border-top:1px solid var(--border);font-size:0.85rem;color:var(--text-muted);">
+          <strong style="color:var(--warning);">⚠️ Data yang dicari tapi tidak ditemukan:</strong>
+          <ul style="margin:0.35rem 0 0 1.1rem;padding:0;">
+            ${missing.map(x => `<li>${escapeHtml(x)}</li>`).join('')}
+          </ul>
+        </div>
+      ` : `
+        <div style="margin-top:0.65rem;font-size:0.85rem;color:var(--success);">✓ Semua data meta penting berhasil ditemukan dari file.</div>
+      `}
+    </div>
+  `;
+
+  const studentsHtml = state.scored.map((r, idx) => `
     <div class="result-item" data-idx="${idx}">
       <div class="result-header">
         <div>
@@ -476,6 +560,8 @@ function renderResults() {
       </div>
     </div>
   `).join('');
+
+  list.innerHTML = metaHtml + studentsHtml;
 
   list.querySelectorAll('.result-header').forEach(header => {
     header.addEventListener('click', () => {

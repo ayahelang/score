@@ -22,35 +22,39 @@ export async function ocrWithGemini(file, apiKey, promptExtra = '', context = 'a
 
   const { base64, mime } = await fileToBase64(file);
 
-  const prompt = `Kamu adalah sistem OCR + analisis dokumen pendidikan Indonesia yang sangat akurat.
+  const prompt = `Kamu adalah sistem OCR + analisis dokumen pendidikan yang sangat ahli membaca TULISAN TANGAN (bahasa Indonesia, Arab, Inggris, dan campuran).
 
-Analisis gambar/dokumen ini dan keluarkan HANYA JSON valid (tanpa markdown, tanpa penjelasan).
+Dokumen bisa berupa foto lembar jawaban siswa, kunci jawaban, modul ajar, atau LJK. Tulisan sering tidak rapi, miring, atau berbahasa Arab.
+
+Analisis gambar/dokumen ini dan keluarkan HANYA JSON valid (tanpa markdown, tanpa teks di luar JSON).
 
 Struktur JSON yang WAJIB diikuti:
 {
   "dokumen_tipe": "lembar_siswa" | "kunci_jawaban" | "modul_ajar" | "lembar_sudah_dinilai" | "lainnya",
   "kepercayaan_kunci": 0-100,
-  "nama": "nama siswa jika ada, null jika tidak",
+  "nama": "nama siswa jika ada (boleh Arab/Latin), null jika tidak",
   "sekolah": "nama sekolah jika terbaca, null jika tidak",
   "kelas": "kelas jika ada, null jika tidak",
   "tanggal": "tanggal ujian jika ada (format bebas), null jika tidak",
-  "mapel": "mata pelajaran jika ada, null jika tidak",
+  "mapel": "mata pelajaran / ruang jika ada, null jika tidak",
   "nomor_absen": "jika ada",
   "tipe_soal": "pg" | "essay" | "campuran",
   "jawaban": [
-    { "nomor": 1, "jawaban": "A atau teks jawaban", "benar": true/false/null }
+    { "nomor": 1, "jawaban": "teks jawaban apa adanya (Arab/Latin/angka/huruf)", "benar": true/false/null }
   ],
-  "teks_soal": "redaksi soal jika terbaca (bisa ringkas)",
+  "teks_soal": "redaksi soal jika terbaca (boleh ringkas)",
   "nilai_tertera": "nilai yang sudah ditulis guru (jika lembar sudah dinilai), null jika tidak",
-  "catatan": "info penting lain"
+  "catatan": "info penting lain (bahasa dominan, kualitas tulisan, dll)"
 }
 
-ATURAN PENTING untuk "kepercayaan_kunci" dan "dokumen_tipe":
-1. Jika ini LEMBAR JAWABAN SISWA YANG SUDAH DINILAI (ada nilai besar dilingkari, coretan pensil/pulpen guru, tapi TIDAK ada tanda ✓/✗ atau kunci yang jelas di setiap nomor) → dokumen_tipe = "lembar_sudah_dinilai", kepercayaan_kunci = 20-40. JANGAN anggap 100% sebagai kunci jawaban.
-2. Jika ini MODUL AJAR / BUKU / LEMBAR SOAL BERISI KUNCI JAWABAN yang jelas (ada daftar nomor + jawaban benar) → dokumen_tipe = "modul_ajar" atau "kunci_jawaban", kepercayaan_kunci = 90-100.
-3. Jika ini KUNCI JAWABAN murni (foto/ss kunci PG atau essay yang jelas) → kepercayaan_kunci = 85-100.
-4. Jika ini LEMBAR SISWA yang belum dinilai → dokumen_tipe = "lembar_siswa", kepercayaan_kunci = 0.
-5. Gabungkan informasi meta (sekolah, kelas, tanggal, mapel) sejauh yang terbaca.
+ATURAN PENTING:
+1. Baca tulisan tangan sebaik mungkin. Jangan mengarang jawaban yang tidak terbaca.
+2. Jika teks berbahasa Arab, transkripsikan tetap dalam Arab (jangan diterjemahkan).
+3. Jika LEMBAR JAWABAN SISWA YANG SUDAH DINILAI (ada nilai besar dilingkari, coretan guru, tapi TIDAK ada tanda ✓/✗ atau kunci jelas per nomor) → dokumen_tipe = "lembar_sudah_dinilai", kepercayaan_kunci = 20-40. JANGAN anggap 100% sebagai kunci.
+4. Jika MODUL AJAR / kunci jawaban jelas → dokumen_tipe = "modul_ajar" atau "kunci_jawaban", kepercayaan_kunci = 90-100.
+5. Jika KUNCI JAWABAN murni → kepercayaan_kunci = 85-100.
+6. Jika LEMBAR SISWA belum dinilai → dokumen_tipe = "lembar_siswa", kepercayaan_kunci = 0.
+7. Ekstrak meta (sekolah, kelas, tanggal, mapel, nama) sejauh yang terbaca.
 
 ${promptExtra}
 
