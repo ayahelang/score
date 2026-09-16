@@ -4,7 +4,7 @@
  * (kirim soal/kunci + lembar siswa sekaligus → dapat nilai + detail)
  */
 
-const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent';
 
 export async function fileToBase64(file) {
   return new Promise((resolve, reject) => {
