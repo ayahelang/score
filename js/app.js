@@ -367,16 +367,41 @@ async function startScoring() {
     }
 
     await setProgress(5, 'Menyiapkan file untuk AI guru...');
-    await setProgress(15, `Mengirim ${state.keyFiles.length} file soal/kunci + ${state.studentFiles.length} lembar siswa ke AI...`);
-    await setProgress(25, 'AI sedang membaca soal & lembar jawaban (seperti guru)...');
+    await setProgress(12, `Mengirim ${state.keyFiles.length} file soal/kunci + ${state.studentFiles.length} lembar siswa ke AI...`);
+    await setProgress(18, 'AI sedang membaca soal & lembar jawaban (seperti guru yg banting tulang hehe)...');
 
     const online = !!$('#online-key')?.checked;
-    const aiResult = await gradeWithAI(state.keyFiles, state.studentFiles, state.geminiKey, {
-      onlineKey: online,
-      extra: 'Nilai secara adil. Untuk PG gunakan kunci atau pengetahuan biologi/mapel. Untuk essay nilai proporsional.'
-    });
+    const waitMsgs = [
+      { pct: 22, msg: 'AI membaca header & identitas siswa...' },
+      { pct: 28, msg: 'AI menelaah soal pilihan ganda...' },
+      { pct: 35, msg: 'AI mencocokkan jawaban PG siswa...' },
+      { pct: 42, msg: 'AI menilai jawaban essay (seperti guru yg banting tulang hehe)...' },
+      { pct: 50, msg: 'AI menyusun skor per butir soal...' },
+      { pct: 58, msg: 'Masih diproses — model gratis kadang antri di peak hours...' },
+      { pct: 65, msg: 'Hampir selesai, AI merapikan laporan nilai...' },
+      { pct: 72, msg: 'Finalisasi JSON hasil penilaian...' }
+    ];
+    let msgIdx = 0;
+    const heartbeat = setInterval(() => {
+      if (msgIdx < waitMsgs.length) {
+        const m = waitMsgs[msgIdx++];
+        setProgress(m.pct, m.msg);
+      } else {
+        setProgress(75, 'Masih menunggu respons AI (kuota gratis / jaringan)...');
+      }
+    }, 4000);
 
-    await setProgress(80, 'Menyusun hasil penilaian...');
+    let aiResult;
+    try {
+      aiResult = await gradeWithAI(state.keyFiles, state.studentFiles, state.geminiKey, {
+        onlineKey: online,
+        extra: 'Nilai secara adil. Untuk PG gunakan kunci atau pengetahuan mapel. Untuk essay nilai proporsional.'
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
+
+    await setProgress(82, 'Menyusun hasil penilaian...');
 
     // Map hasil AI ke state aplikasi
     const meta = aiResult.meta || {};
@@ -771,14 +796,19 @@ async function loadTestimonials() {
     box.innerHTML = '<p class="hint">Belum ada testimoni. Jadilah yang pertama!</p>';
     return;
   }
-  box.innerHTML = rows.map(t => `
+  box.innerHTML = rows.map(t => {
+    const nm = t.name || 'Anonim';
+    const initial = (nm.trim()[0] || '?').toUpperCase();
+    return `
     <div class="testimonial-item">
-      <div class="testimonial-head"><strong>${escapeHtml(t.name || 'Anonim')}</strong>
-        <span class="hint">${t.created_at ? new Date(t.created_at).toLocaleDateString('id-ID') : ''}</span>
+      <div class="testimonial-avatar">${escapeHtml(initial)}</div>
+      <div class="testimonial-head">
+        <strong>${escapeHtml(nm)}</strong>
+        <span class="hint">${t.created_at ? new Date(t.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}</span>
       </div>
-      <p>${escapeHtml(t.comment || '👍 Suka aplikasi ini')}</p>
-    </div>
-  `).join('');
+      <p>“${escapeHtml(t.comment || 'Suka aplikasi ini 👍')}”</p>
+    </div>`;
+  }).join('');
 }
 
 function renderAnalysis() {

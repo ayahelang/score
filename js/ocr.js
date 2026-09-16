@@ -33,11 +33,37 @@ export async function fileToBase64(file) {
 }
 
 function parseJsonFromText(text) {
-  const match = text && text.match(/\{[\s\S]*\}/);
-  if (match) {
-    try { return JSON.parse(match[0]); } catch (e) { console.warn('JSON parse fail', e); }
+  if (!text || typeof text !== 'string') {
+    return { error: 'Respons AI kosong', raw_text: text };
   }
-  return { raw_text: text, error: 'Gagal parse JSON dari AI' };
+  let t = text.trim();
+  // Buang markdown code fence
+  t = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  // Coba parse langsung
+  try { return JSON.parse(t); } catch (_) {}
+  // Ambil objek JSON terpanjang
+  const matches = t.match(/\{[\s\S]*\}/g);
+  if (matches) {
+    const sorted = matches.slice().sort((a, b) => b.length - a.length);
+    for (const m of sorted) {
+      try { return JSON.parse(m); } catch (_) {}
+      // Perbaiki trailing comma kasar
+      try {
+        const fixed = m.replace(/,\s*([}\]])/g, '$1');
+        return JSON.parse(fixed);
+      } catch (_) {}
+    }
+  }
+  // Cari dari { pertama sampai } terakhir
+  const i = t.indexOf('{');
+  const j = t.lastIndexOf('}');
+  if (i >= 0 && j > i) {
+    const slice = t.slice(i, j + 1);
+    try { return JSON.parse(slice); } catch (_) {}
+    try { return JSON.parse(slice.replace(/,\s*([}\]])/g, '$1')); } catch (_) {}
+  }
+  console.warn('JSON parse gagal, cuplikan:', t.slice(0, 400));
+  return { raw_text: t, error: 'Gagal parse JSON dari AI' };
 }
 
 async function callGemini(apiKey, body) {
@@ -163,7 +189,7 @@ HANYA JSON.`;
 
   const body = {
     contents: [{ parts }],
-    generationConfig: { temperature: 0.15, maxOutputTokens: 8192 }
+    generationConfig: { temperature: 0.15, maxOutputTokens: 8192, responseMimeType: "application/json" }
   };
 
   const data = await callGemini(apiKey, body);
@@ -171,8 +197,18 @@ HANYA JSON.`;
   const parsed = parseJsonFromText(text);
   parsed._usedModel = data._usedModel;
 
-  if (parsed.error && !parsed.siswa) {
-    throw new Error('AI tidak mengembalikan hasil valid. Model: ' + (data._usedModel || '?') + '. Coba ulang.');
+  // Normalisasi: kadang AI bungkus di "data" / "result"
+  if (!parsed.siswa && parsed.data && parsed.data.siswa) Object.assign(parsed, parsed.data);
+  if (!parsed.siswa && parsed.result && parsed.result.siswa) Object.assign(parsed, parsed.result);
+  if (!parsed.siswa && Array.isArray(parsed.results)) parsed.siswa = parsed.results;
+  if (!parsed.siswa && parsed.nama) parsed.siswa = [parsed]; // satu siswa di root
+
+  if ((!parsed.siswa || !parsed.siswa.length) && parsed.error) {
+    throw new Error('AI tidak mengembalikan hasil valid. Model: ' + (data._usedModel || '?') + '. Coba ulang. Detail: ' + String(parsed.error));
+  }
+  if (!parsed.siswa || !parsed.siswa.length) {
+    console.warn('Raw AI text:', text.slice(0, 500));
+    throw new Error('AI merespons tapi format tidak dikenali. Model: ' + (data._usedModel || '?') + '. Coba ulang (kadang peak Gemini).');
   }
   return parsed;
 }
