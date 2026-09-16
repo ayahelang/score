@@ -44,7 +44,38 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   updateStartButton();
+  setupFeedbackUI();
+  loadTestimonials();
 });
+
+function setupFeedbackUI() {
+  $('#btn-like-app')?.addEventListener('click', () => {
+    $('#feedback-step-1')?.classList.add('hidden');
+    $('#feedback-step-2')?.classList.remove('hidden');
+  });
+  $('#btn-dislike-app')?.addEventListener('click', () => {
+    sessionStorage.setItem('sh_feedback_done', '1');
+    $('#feedback-modal')?.classList.add('hidden');
+  });
+  $('#btn-skip-feedback')?.addEventListener('click', () => {
+    sessionStorage.setItem('sh_feedback_done', '1');
+    $('#feedback-modal')?.classList.add('hidden');
+  });
+  $('#btn-submit-testimonial')?.addEventListener('click', async () => {
+    const name = $('#fb-name')?.value?.trim() || 'Anonim';
+    const comment = $('#fb-comment')?.value?.trim() || '';
+    await submitTestimonial(name, comment, true);
+    sessionStorage.setItem('sh_feedback_done', '1');
+    $('#feedback-step-2')?.classList.add('hidden');
+    $('#feedback-step-3')?.classList.remove('hidden');
+    loadTestimonials();
+  });
+  $('#btn-close-feedback')?.addEventListener('click', () => {
+    sessionStorage.setItem('sh_feedback_done', '1');
+    $('#feedback-modal')?.classList.add('hidden');
+  });
+}
+
 
 function setupTheme() {
   const saved = localStorage.getItem('sh_theme') || 'dark';
@@ -370,25 +401,56 @@ async function startScoring() {
     state.studentResults = siswaList.map((s, i) => ({
       nama: s.nama || 'Tanpa Nama',
       kelas: s.kelas || '',
-      jawaban: (s.details || []).map(d => ({ nomor: d.nomor, jawaban: d.siswa })),
+      jawaban: [],
       _fileHint: s.file || (state.studentFiles[i] && state.studentFiles[i].name.replace(/\.[^.]+$/, '')) || ''
     }));
 
-    state.scored = siswaList.map((s, i) => ({
-      nama: s.nama || 'Tanpa Nama',
-      kelas: s.kelas || '',
-      score: typeof s.score === 'number' ? s.score : 0,
-      correct: s.correct || 0,
-      total: s.total || (s.details || []).length || 1,
-      details: (s.details || []).map(d => ({
-        nomor: d.nomor,
-        siswa: d.siswa || '-',
-        kunci: d.kunci || '-',
-        benar: !!d.benar,
-        tipe: d.tipe || 'pg',
-        catatan: d.catatan || ''
-      }))
-    }));
+    state.scored = siswaList.map((s) => {
+      // Normalisasi struktur PG / Essay dari AI
+      let pg = s.pg || null;
+      let essay = s.essay || null;
+      if (!pg && !essay && Array.isArray(s.details)) {
+        const pgItems = s.details.filter(d => (d.tipe || 'pg') === 'pg' || String(d.siswa || '').length <= 3);
+        const esItems = s.details.filter(d => !pgItems.includes(d));
+        if (pgItems.length) {
+          const benar = pgItems.filter(d => d.benar).length;
+          pg = { benar, total: pgItems.length, persen: Math.round(benar / pgItems.length * 100), items: pgItems.map(d => ({
+            nomor: d.nomor, soal: d.soal || '', kunci: d.kunci || '-', siswa: d.siswa || '-', benar: !!d.benar, skor: d.benar ? 100 : 0, catatan: d.catatan || ''
+          })) };
+        }
+        if (esItems.length) {
+          const skor = esItems.reduce((a, d) => a + (d.skor_butir || d.skor || (d.benar ? 100 : 0)), 0);
+          const maks = esItems.length * 100;
+          essay = { skor_total: skor, skor_maks: maks, persen: Math.round(skor / maks * 100), items: esItems.map(d => ({
+            nomor: d.nomor, soal: d.soal || '', kunci: d.kunci || '-', siswa: d.siswa || '-', benar: !!d.benar, skor: d.skor_butir || d.skor || (d.benar ? 100 : 0), catatan: d.catatan || ''
+          })) };
+        }
+      }
+      if (pg && pg.items) {
+        pg.benar = pg.benar ?? pg.items.filter(i => i.benar).length;
+        pg.total = pg.total ?? pg.items.length;
+        pg.persen = pg.persen ?? (pg.total ? Math.round(pg.benar / pg.total * 100) : 0);
+      }
+      if (essay && essay.items) {
+        essay.skor_total = essay.skor_total ?? essay.items.reduce((a, i) => a + (i.skor || 0), 0);
+        essay.skor_maks = essay.skor_maks ?? (essay.items.length * 100);
+        essay.persen = essay.persen ?? (essay.skor_maks ? Math.round(essay.skor_total / essay.skor_maks * 100) : 0);
+      }
+      return {
+        nama: s.nama || 'Tanpa Nama',
+        kelas: s.kelas || '',
+        score: typeof s.score === 'number' ? s.score : 0,
+        correct: s.correct || (pg ? pg.benar : 0),
+        total: s.total || (pg ? pg.total : 0),
+        pg,
+        essay,
+        details: s.details || []
+      };
+    });
+
+    if (aiResult._usedModel) {
+      console.log('AI model used:', aiResult._usedModel);
+    }
 
     // Jika AI tidak mengembalikan siswa sama sekali, fallback pesan
     if (state.scored.length === 0) {
@@ -410,6 +472,7 @@ async function startScoring() {
     progressSec.classList.add('hidden');
     resultsSec.classList.remove('hidden');
     resultsSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    scheduleFeedbackModal();
   } catch (err) {
     console.error(err);
     await setProgress(0, 'Error: ' + err.message);
@@ -527,67 +590,195 @@ function renderResults() {
   ];
 
   const metaHtml = `
-    <div class="meta-summary" style="margin-bottom:1rem;padding:0.85rem 1rem;background:var(--bg-elevated);border-radius:10px;border:1px solid var(--border);">
-      <div style="font-weight:600;margin-bottom:0.5rem;color:var(--accent);">📋 Informasi Ujian</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.4rem 1rem;font-size:0.9rem;">
+    <div class="meta-summary card-inner">
+      <div class="meta-title">📋 Informasi Ujian</div>
+      <div class="meta-grid">
         ${metaRows.map(m => `
-          <div>
-            <span style="color:var(--text-muted);">${m.label}:</span>
-            <strong>${m.value ? escapeHtml(m.value) : '<span style="color:var(--warning);font-weight:500;">Tidak ditemukan di file</span>'}</strong>
-          </div>
+          <div><span class="muted">${m.label}:</span>
+          <strong>${m.value ? escapeHtml(m.value) : '<span class="warn-text">Tidak ditemukan di file</span>'}</strong></div>
         `).join('')}
       </div>
       ${missing.length ? `
-        <div style="margin-top:0.75rem;padding-top:0.65rem;border-top:1px solid var(--border);font-size:0.85rem;color:var(--text-muted);">
-          <strong style="color:var(--warning);">⚠️ Data yang dicari tapi tidak ditemukan:</strong>
-          <ul style="margin:0.35rem 0 0 1.1rem;padding:0;">
-            ${missing.map(x => `<li>${escapeHtml(x)}</li>`).join('')}
-          </ul>
-        </div>
-      ` : `
-        <div style="margin-top:0.65rem;font-size:0.85rem;color:var(--success);">✓ Semua data meta penting berhasil ditemukan dari file.</div>
-      `}
-    </div>
-  `;
+        <div class="missing-box">
+          <strong class="warn-text">⚠️ Data yang dicari tapi tidak ditemukan:</strong>
+          <ul>${missing.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
+        </div>` : `<div class="ok-text">✓ Data meta penting berhasil ditemukan.</div>`}
+    </div>`;
 
-  const studentsHtml = state.scored.map((r, idx) => {
+  // Tabel konsisten: No | Nama Siswa | Nilai
+  const tableHead = `
+    <div class="score-table">
+      <div class="score-table-head">
+        <span class="col-no">No</span>
+        <span class="col-name">Nama Siswa</span>
+        <span class="col-score">Nilai</span>
+      </div>`;
+
+  const rows = state.scored.map((r, idx) => {
     const src = state.studentResults[idx] || {};
     const nameDisplay = (r.nama === 'Tanpa Nama' && src._fileHint)
       ? `Tanpa Nama <span class="hint">(file: ${escapeHtml(src._fileHint)})</span>`
       : escapeHtml(r.nama || 'Tanpa Nama');
-    return `
-    <div class="result-item" data-idx="${idx}">
-      <div class="result-header">
-        <div>
-          <span class="result-name">${nameDisplay}</span>
-          ${r.kelas ? `<span class="hint"> • ${escapeHtml(r.kelas)}</span>` : ''}
-        </div>
-        <span class="result-score">${r.score}</span>
-      </div>
-      <div class="result-body">
-        <div class="qa-row" style="font-weight:600;color:var(--text-muted)">
-          <span>No</span><span>Jawaban Siswa</span><span>Kunci / Status</span>
-        </div>
-        ${(r.details || []).map(d => `
-          <div class="qa-row">
-            <span class="qa-num">${d.nomor}</span>
-            <span dir="auto">${escapeHtml(String(d.siswa || '-'))}</span>
-            <span class="${d.benar ? 'qa-correct' : 'qa-wrong'}" dir="auto">
-              ${escapeHtml(String(d.kunci || '-'))} ${d.benar ? '✓' : '✗'}
-            </span>
+
+    const pg = r.pg;
+    const essay = r.essay;
+
+    let detailHtml = '';
+
+    if (pg && pg.items && pg.items.length) {
+      detailHtml += `
+        <div class="detail-section">
+          <div class="detail-section-title">📌 Pilihan Ganda — Benar ${pg.benar}/${pg.total} (${pg.persen}%)</div>
+          <div class="detail-table">
+            <div class="detail-row detail-head">
+              <span>No</span><span>Soal</span><span>Kunci</span><span>Jawaban Siswa</span><span>Nilai</span>
+            </div>
+            ${pg.items.map(it => `
+              <div class="detail-row">
+                <span class="qa-num">${escapeHtml(String(it.nomor))}</span>
+                <span class="soal-cell">
+                  <button type="button" class="btn-link btn-toggle-soal">Lihat soal</button>
+                  <span class="soal-text hidden" dir="auto">${escapeHtml(it.soal || '(tidak ada redaksi)')}</span>
+                </span>
+                <span dir="auto">${escapeHtml(String(it.kunci || '-'))}</span>
+                <span class="${it.benar ? 'qa-correct' : 'qa-wrong'}" dir="auto">${escapeHtml(String(it.siswa || '-'))}</span>
+                <span class="${it.benar ? 'qa-correct' : 'qa-wrong'}">${it.benar ? '✓' : '✗'} ${it.skor ?? (it.benar ? 100 : 0)}</span>
+              </div>
+            `).join('')}
           </div>
-        `).join('')}
-      </div>
-    </div>`;
+        </div>`;
+    }
+
+    if (essay && essay.items && essay.items.length) {
+      detailHtml += `
+        <div class="detail-section">
+          <div class="detail-section-title">📝 Essay — Skor ${essay.skor_total}/${essay.skor_maks} (${essay.persen}%)</div>
+          <div class="detail-table essay-table">
+            <div class="detail-row detail-head">
+              <span>No</span><span>Soal</span><span>Kunci / Kriteria</span><span>Jawaban Siswa</span><span>Nilai</span>
+            </div>
+            ${essay.items.map(it => `
+              <div class="detail-row">
+                <span class="qa-num">${escapeHtml(String(it.nomor))}</span>
+                <span class="soal-cell">
+                  <button type="button" class="btn-link btn-toggle-soal">Lihat soal</button>
+                  <span class="soal-text hidden" dir="auto">${escapeHtml(it.soal || '(tidak ada redaksi)')}</span>
+                </span>
+                <span dir="auto">${escapeHtml(String(it.kunci || '-'))}</span>
+                <span dir="auto">${escapeHtml(String(it.siswa || '-'))}</span>
+                <span class="${(it.skor || 0) >= 60 ? 'qa-correct' : 'qa-wrong'}">${it.skor ?? 0}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>`;
+    }
+
+    if (!detailHtml && r.details && r.details.length) {
+      detailHtml = `<div class="detail-section"><div class="detail-table">
+        ${r.details.map(d => `<div class="detail-row">
+          <span>${escapeHtml(String(d.nomor))}</span>
+          <span></span>
+          <span>${escapeHtml(String(d.kunci || '-'))}</span>
+          <span class="${d.benar ? 'qa-correct' : 'qa-wrong'}">${escapeHtml(String(d.siswa || '-'))}</span>
+          <span>${d.benar ? '✓' : '✗'}</span>
+        </div>`).join('')}
+      </div></div>`;
+    }
+
+    return `
+      <div class="result-item" data-idx="${idx}">
+        <div class="result-header score-table-row">
+          <span class="col-no">${idx + 1}</span>
+          <span class="col-name result-name">${nameDisplay}${r.kelas ? ` <span class="hint">• ${escapeHtml(r.kelas)}</span>` : ''}</span>
+          <span class="col-score result-score">${r.score}</span>
+        </div>
+        <div class="result-body">${detailHtml || '<p class="hint">Tidak ada detail butir.</p>'}</div>
+      </div>`;
   }).join('');
 
-  list.innerHTML = metaHtml + studentsHtml;
+  list.innerHTML = metaHtml + tableHead + rows + '</div>';
 
   list.querySelectorAll('.result-header').forEach(header => {
-    header.addEventListener('click', () => {
+    header.addEventListener('click', (e) => {
+      if (e.target.closest('.btn-toggle-soal')) return;
       header.parentElement.classList.toggle('open');
     });
   });
+  list.querySelectorAll('.btn-toggle-soal').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const text = btn.parentElement.querySelector('.soal-text');
+      if (!text) return;
+      text.classList.toggle('hidden');
+      btn.textContent = text.classList.contains('hidden') ? 'Lihat soal' : 'Sembunyikan soal';
+    });
+  });
+}
+
+function scheduleFeedbackModal() {
+  // Tampil ~2 detik setelah hasil
+  setTimeout(() => {
+    if (sessionStorage.getItem('sh_feedback_done')) return;
+    const modal = $('#feedback-modal');
+    if (modal) modal.classList.remove('hidden');
+  }, 2000);
+}
+
+async function submitTestimonial(name, comment, liked) {
+  const payload = {
+    name: name || 'Anonim',
+    comment: comment || '',
+    liked: !!liked,
+    created_at: new Date().toISOString()
+  };
+  // Coba Supabase
+  try {
+    const { getSupabase } = await import('./supabase.js');
+    const sb = getSupabase();
+    if (sb) {
+      const { error } = await sb.from('testimonials').insert([payload]);
+      if (!error) return true;
+      console.warn('testimonial insert', error);
+    }
+  } catch (e) {
+    console.warn(e);
+  }
+  // Fallback localStorage list (tampil di browser ini saja jika DB gagal)
+  try {
+    const list = JSON.parse(localStorage.getItem('sh_testimonials') || '[]');
+    list.unshift(payload);
+    localStorage.setItem('sh_testimonials', JSON.stringify(list.slice(0, 50)));
+  } catch (_) {}
+  return false;
+}
+
+async function loadTestimonials() {
+  const box = $('#testimonials-list');
+  if (!box) return;
+  let rows = [];
+  try {
+    const { getSupabase } = await import('./supabase.js');
+    const sb = getSupabase();
+    if (sb) {
+      const { data } = await sb.from('testimonials').select('*').order('created_at', { ascending: false }).limit(30);
+      if (data) rows = data;
+    }
+  } catch (_) {}
+  if (!rows.length) {
+    try { rows = JSON.parse(localStorage.getItem('sh_testimonials') || '[]'); } catch (_) { rows = []; }
+  }
+  if (!rows.length) {
+    box.innerHTML = '<p class="hint">Belum ada testimoni. Jadilah yang pertama!</p>';
+    return;
+  }
+  box.innerHTML = rows.map(t => `
+    <div class="testimonial-item">
+      <div class="testimonial-head"><strong>${escapeHtml(t.name || 'Anonim')}</strong>
+        <span class="hint">${t.created_at ? new Date(t.created_at).toLocaleDateString('id-ID') : ''}</span>
+      </div>
+      <p>${escapeHtml(t.comment || '👍 Suka aplikasi ini')}</p>
+    </div>
+  `).join('');
 }
 
 function renderAnalysis() {

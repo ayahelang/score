@@ -588,3 +588,86 @@ body {
   background: var(--border);
   border-radius: 3px;
 }
+
+/* Score table consistent */
+.score-table { width: 100%; }
+.score-table-head, .score-table-row {
+  display: grid;
+  grid-template-columns: 48px 1fr 72px;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+}
+.score-table-head {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.col-score { text-align: right; font-family: var(--mono); font-weight: 700; color: var(--accent); }
+.col-no { color: var(--text-muted); font-family: var(--mono); }
+
+.meta-summary.card-inner, .card-inner {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  background: var(--bg-elevated);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.meta-title { font-weight: 600; margin-bottom: 0.5rem; color: var(--accent); }
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.4rem 1rem;
+  font-size: 0.9rem;
+}
+.muted { color: var(--text-muted); }
+.warn-text { color: var(--warning); font-weight: 500; }
+.ok-text { margin-top: 0.65rem; font-size: 0.85rem; color: var(--success); }
+.missing-box { margin-top: 0.75rem; padding-top: 0.65rem; border-top: 1px solid var(--border); font-size: 0.85rem; color: var(--text-muted); }
+
+.detail-section { margin-bottom: 1rem; }
+.detail-section-title { font-weight: 600; margin-bottom: 0.5rem; font-size: 0.9rem; }
+.detail-table { font-size: 0.85rem; }
+.detail-row {
+  display: grid;
+  grid-template-columns: 40px minmax(80px, 1.2fr) minmax(70px, 1fr) minmax(70px, 1fr) 56px;
+  gap: 0.4rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+  align-items: start;
+}
+.detail-head { font-weight: 600; color: var(--text-muted); }
+.btn-link {
+  background: none; border: none; color: var(--accent); cursor: pointer;
+  font-size: 0.8rem; padding: 0; text-decoration: underline;
+}
+.soal-text { display: block; margin-top: 0.25rem; color: var(--text); }
+.soal-text.hidden { display: none; }
+
+.testimonials-list { display: flex; flex-direction: column; gap: 0.65rem; max-height: 320px; overflow-y: auto; }
+.testimonial-item {
+  padding: 0.65rem 0.85rem;
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+.testimonial-head { display: flex; justify-content: space-between; margin-bottom: 0.25rem; }
+.qris-dummy {
+  display: inline-block;
+  padding: 0.5rem;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.support-box { font-size: 0.9rem; }
+
+@media (max-width: 640px) {
+  .detail-row {
+    grid-template-columns: 32px 1fr;
+  }
+  .detail-row span:nth-child(n+3) {
+    grid-column: 2;
+  }
+}

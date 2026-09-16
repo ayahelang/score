@@ -153,6 +153,16 @@
       </section>
     </main>
 
+    <!-- Testimonials -->
+      <section id="testimonials-section" class="card" style="margin-top:1rem">
+        <div class="card-header">
+          <h2>💬 Testimoni Pengguna</h2>
+        </div>
+        <div id="testimonials-list" class="testimonials-list">
+          <p class="hint">Memuat testimoni...</p>
+        </div>
+      </section>
+
     <!-- Footer -->
     <footer class="footer">
       <div class="container">
@@ -184,6 +194,61 @@
         <button id="btn-skip-config" class="btn btn-ghost">Lewati (demo mode)</button>
       </div>
       <p class="hint">Lihat README.md untuk cara mendapatkan key gratis.</p>
+    </div>
+  </div>
+
+  
+  <!-- Feedback / Like modal -->
+  <div id="feedback-modal" class="modal hidden">
+    <div class="modal-content" style="max-width:440px">
+      <div id="feedback-step-1">
+        <h2>💙 Suka dengan Silverhawk Scoring?</h2>
+        <p>Bantu kami dengan feedback singkat.</p>
+        <div class="btn-group" style="margin-top:1rem">
+          <button id="btn-like-app" class="btn btn-primary">👍 Suka</button>
+          <button id="btn-dislike-app" class="btn btn-ghost">Nanti saja</button>
+        </div>
+      </div>
+      <div id="feedback-step-2" class="hidden">
+        <h2>Terima kasih! 🙏</h2>
+        <p>Isi nama & komentar (opsional). Testimoni bisa dilihat pengunjung lain.</p>
+        <div class="form-group">
+          <label>Nama</label>
+          <input type="text" id="fb-name" placeholder="Nama Anda" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label>Komentar</label>
+          <input type="text" id="fb-comment" placeholder="Aplikasi ini membantu..." autocomplete="off" />
+        </div>
+        <div class="btn-group" style="margin-top:0.75rem">
+          <button id="btn-submit-testimonial" class="btn btn-primary">Kirim</button>
+          <button id="btn-skip-feedback" class="btn btn-ghost">Lewati</button>
+        </div>
+        <div class="support-box" style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border)">
+          <p style="font-weight:600;margin-bottom:0.5rem">☕ Traktir kopi ke Teddy Mulyana</p>
+          <p class="hint" style="margin-bottom:0.5rem">QRIS BNI (dummy — ganti nanti)</p>
+          <div class="qris-dummy" id="qris-dummy" title="Ganti dengan QRIS asli">
+            <svg width="140" height="140" viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg">
+              <rect width="140" height="140" fill="#fff"/>
+              <rect x="10" y="10" width="40" height="40" fill="#111"/>
+              <rect x="90" y="10" width="40" height="40" fill="#111"/>
+              <rect x="10" y="90" width="40" height="40" fill="#111"/>
+              <rect x="55" y="55" width="30" height="30" fill="#111"/>
+              <text x="70" y="130" text-anchor="middle" font-size="10" fill="#333">QRIS DUMMY BNI</text>
+            </svg>
+          </div>
+          <p class="hint" style="margin-top:0.6rem">
+            GoPay: <strong>+6285158822803</strong><br/>
+            Dana: <strong>+6285159922358</strong><br/>
+            a.n. <strong>Teddy Mulyana</strong>
+          </p>
+        </div>
+      </div>
+      <div id="feedback-step-3" class="hidden">
+        <h2>✅ Tersimpan!</h2>
+        <p>Terima kasih atas dukungannya.</p>
+        <button id="btn-close-feedback" class="btn btn-primary" style="margin-top:1rem">Tutup</button>
+      </div>
     </div>
   </div>
 

@@ -107,3 +107,22 @@ Deno.serve(async () => {
   return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
 })
 */
+
+-- Testimonials (publik)
+create table if not exists public.testimonials (
+  id uuid default uuid_generate_v4() primary key,
+  name text,
+  comment text,
+  liked boolean default true,
+  created_at timestamptz default now()
+);
+
+alter table public.testimonials enable row level security;
+
+-- Siapa pun bisa baca testimoni
+create policy "Public read testimonials"
+  on public.testimonials for select using (true);
+
+-- Siapa pun bisa insert (tanpa login) — batasi abuse di production jika perlu
+create policy "Public insert testimonials"
+  on public.testimonials for insert with check (true);
