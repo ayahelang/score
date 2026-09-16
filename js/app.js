@@ -56,6 +56,15 @@ function setupTheme() {
 }
 
 function setupConfigModal() {
+  // Pastikan field meta kosong & anti-autofill
+  ['meta-school', 'meta-class', 'meta-date', 'meta-room'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.value = '';
+      el.setAttribute('autocomplete', 'off');
+    }
+  });
+
   $('#btn-save-config')?.addEventListener('click', () => {
     const url = $('#cfg-supabase-url').value.trim();
     const key = $('#cfg-supabase-key').value.trim();
@@ -197,7 +206,8 @@ function setupButtons() {
     try {
       await signInWithGoogle();
     } catch (e) {
-      alert('Login gagal: ' + e.message + '\nPastikan Supabase sudah dikonfigurasi & Google provider diaktifkan.');
+      alert('Login gagal: ' + e.message +
+        '\n\nPastikan:\n1. Google provider sudah diaktifkan di Supabase\n2. Site URL di Supabase Authentication → URL Configuration sudah diganti ke URL GitHub Pages kamu (bukan localhost)\n3. Redirect URL di Google Cloud sama dengan Callback Supabase');
     }
   });
 
@@ -255,70 +265,89 @@ async function startScoring() {
   resultsSec.classList.add('hidden');
   $('#analysis-section').classList.add('hidden');
 
+  // Scroll ke progress supaya user langsung melihat
+  progressSec.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
   state.startTime = Date.now();
   state.timerInterval = setInterval(() => {
     const elapsed = (Date.now() - state.startTime) / 1000;
-    $('#progress-elapsed').textContent = formatTime(elapsed);
-  }, 500);
+    const el = $('#progress-elapsed');
+    if (el) el.textContent = formatTime(elapsed);
+  }, 400);
 
-  const totalSteps = state.keyFiles.length + state.studentFiles.length + 2;
-  let step = 0;
-
-  const setProgress = (pct, status) => {
-    $('#progress-bar').style.width = `${pct}%`;
-    $('#progress-status').textContent = status;
+  // setProgress async supaya browser sempat repaint (progress bar & teks terlihat real-time)
+  const setProgress = async (pct, status) => {
+    const bar = $('#progress-bar');
+    const statusEl = $('#progress-status');
+    const titleEl = $('#progress-title');
+    if (bar) bar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+    if (statusEl) statusEl.textContent = status;
+    if (titleEl) titleEl.textContent = pct >= 100 ? 'Selesai!' : 'Sedang memproses...';
+    // Yield ke event loop agar UI update terlihat
+    await new Promise(r => setTimeout(r, 50));
   };
 
   try {
     // 1. OCR Kunci Jawaban
-    setProgress(5, 'Membaca kunci jawaban...');
+    await setProgress(3, 'Menyiapkan pembacaan kunci jawaban / modul...');
     for (let i = 0; i < state.keyFiles.length; i++) {
       const f = state.keyFiles[i];
-      setProgress(5 + (i / state.keyFiles.length) * 25, `OCR kunci: ${f.name}`);
-      const result = await processFile(f, state.geminiKey, true);
+      const pct = 5 + ((i + 0.5) / Math.max(state.keyFiles.length, 1)) * 28;
+      await setProgress(pct, `OCR kunci (${i + 1}/${state.keyFiles.length}): ${f.name}`);
+      const result = await processFile(f, state.geminiKey, true, 'key');
       state.keyResults.push(result);
-      step++;
+      await setProgress(5 + ((i + 1) / Math.max(state.keyFiles.length, 1)) * 28, `Selesai OCR kunci: ${f.name}`);
     }
 
-    // Merge key answers
+    // Merge key answers (dengan filter kepercayaan)
+    await setProgress(35, 'Menggabungkan kunci jawaban...');
     const mergedKey = mergeKeyResults(state.keyResults);
+
+    // Auto-isi meta dari hasil OCR jika user tidak mengisi
+    autoFillMetaFromResults([...state.keyResults]);
 
     // 2. Online second opinion (optional)
     let onlineKey = null;
     if ($('#online-key')?.checked && state.geminiKey) {
-      setProgress(35, 'Mencari second opinion kunci online (AI)...');
-      // Ambil teks soal dari hasil OCR jika ada
+      await setProgress(38, 'Mencari second opinion kunci online (AI)...');
       const sampleQ = state.keyResults.find(r => r.teks_soal)?.teks_soal ||
         (mergedKey.jawaban?.[0] ? `Soal nomor ${mergedKey.jawaban[0].nomor}` : null);
       if (sampleQ) {
         onlineKey = await searchAnswerKeyOnline(sampleQ, state.geminiKey);
       }
+      await setProgress(42, 'Second opinion selesai');
     }
 
     // 3. OCR Lembar Siswa
-    setProgress(40, 'Membaca lembar jawaban siswa...');
+    await setProgress(45, 'Mulai membaca lembar jawaban siswa...');
     for (let i = 0; i < state.studentFiles.length; i++) {
       const f = state.studentFiles[i];
-      setProgress(40 + (i / state.studentFiles.length) * 45, `OCR siswa: ${f.name}`);
-      const result = await processFile(f, state.geminiKey, true);
-      // Jika nama kosong, pakai nama file
+      const pct = 45 + ((i + 0.5) / Math.max(state.studentFiles.length, 1)) * 40;
+      await setProgress(pct, `OCR siswa (${i + 1}/${state.studentFiles.length}): ${f.name}`);
+      const result = await processFile(f, state.geminiKey, true, 'student');
       if (!result.nama) result.nama = f.name.replace(/\.[^.]+$/, '');
       state.studentResults.push(result);
+      await setProgress(45 + ((i + 1) / Math.max(state.studentFiles.length, 1)) * 40, `Selesai OCR siswa: ${f.name}`);
     }
 
+    // Auto-isi meta lagi dari data siswa (jika masih kosong)
+    autoFillMetaFromResults(state.studentResults);
+
     // 4. Scoring
-    setProgress(90, 'Menghitung nilai...');
+    await setProgress(90, 'Menghitung nilai siswa...');
     state.scored = state.studentResults.map(st => scoreStudent(st, mergedKey, onlineKey));
 
-    setProgress(100, 'Selesai!');
-    await new Promise(r => setTimeout(r, 600));
+    await setProgress(98, 'Menyiapkan tampilan hasil...');
+    await setProgress(100, 'Selesai! Menampilkan hasil...');
+    await new Promise(r => setTimeout(r, 500));
 
     renderResults();
     progressSec.classList.add('hidden');
     resultsSec.classList.remove('hidden');
+    resultsSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (err) {
     console.error(err);
-    setProgress(0, 'Error: ' + err.message);
+    await setProgress(0, 'Error: ' + err.message);
     alert('Terjadi kesalahan: ' + err.message);
   } finally {
     clearInterval(state.timerInterval);
@@ -327,22 +356,95 @@ async function startScoring() {
   }
 }
 
+/**
+ * Gabungkan kunci jawaban.
+ * Prioritas tinggi: modul_ajar / kunci_jawaban dengan kepercayaan tinggi.
+ * Lembar yang sudah dinilai (hanya ada nilai dilingkari) → prioritas rendah.
+ */
 function mergeKeyResults(results) {
-  const jawaban = [];
-  const seen = new Set();
-  results.forEach(r => {
+  const jawabanMap = new Map(); // nomor → { jawaban, score, source }
+
+  // Urutkan: kepercayaan tinggi dulu
+  const sorted = [...results].sort((a, b) => (b.kepercayaan_kunci || 0) - (a.kepercayaan_kunci || 0));
+
+  sorted.forEach(r => {
+    const conf = r.kepercayaan_kunci || 0;
+    const tipe = r.dokumen_tipe || '';
+
+    // Skip jika jelas-jelas lembar siswa yang sudah dinilai dengan conf rendah
+    if (tipe === 'lembar_sudah_dinilai' && conf < 50) {
+      console.log('Skip sebagai kunci utama (lembar sudah dinilai):', r);
+      // Tetap boleh dipakai sebagai supplementary jika tidak ada kunci lain
+    }
+
     (r.jawaban || []).forEach(j => {
       const n = Number(j.nomor);
-      if (!seen.has(n)) {
-        seen.add(n);
-        jawaban.push(j);
+      if (!n) return;
+      const existing = jawabanMap.get(n);
+      // Ganti hanya jika yang baru punya conf lebih tinggi, atau belum ada
+      if (!existing || conf > existing.score) {
+        jawabanMap.set(n, {
+          jawaban: j.jawaban,
+          score: conf,
+          source: tipe
+        });
       }
     });
   });
+
+  const jawaban = [];
+  jawabanMap.forEach((val, nomor) => {
+    jawaban.push({ nomor, jawaban: val.jawaban });
+  });
+  jawaban.sort((a, b) => a.nomor - b.nomor);
+
   return {
     jawaban,
-    teks_soal: results.find(r => r.teks_soal)?.teks_soal || ''
+    teks_soal: results.find(r => r.teks_soal)?.teks_soal || '',
+    meta: extractMetaFromResults(results)
   };
+}
+
+function extractMetaFromResults(results) {
+  const meta = { school: null, class: null, date: null, room: null };
+  for (const r of results) {
+    if (!meta.school && r.sekolah) meta.school = r.sekolah;
+    if (!meta.class && r.kelas) meta.class = r.kelas;
+    if (!meta.date && r.tanggal) meta.date = r.tanggal;
+    if (!meta.room && r.mapel) meta.room = r.mapel;
+  }
+  return meta;
+}
+
+/** Isi field meta di form jika masih kosong */
+function autoFillMetaFromResults(results) {
+  const extracted = extractMetaFromResults(results);
+  if (extracted.school && !$('#meta-school').value) {
+    $('#meta-school').value = extracted.school;
+  }
+  if (extracted.class && !$('#meta-class').value) {
+    $('#meta-class').value = extracted.class;
+  }
+  if (extracted.date && !$('#meta-date').value) {
+    // Coba parse ke format date input (YYYY-MM-DD) jika memungkinkan
+    $('#meta-date').value = tryParseDate(extracted.date) || '';
+    // Juga simpan teks asli di room jika perlu
+  }
+  if (extracted.room && !$('#meta-room').value) {
+    $('#meta-room').value = extracted.room;
+  }
+}
+
+function tryParseDate(str) {
+  if (!str) return '';
+  // Coba format Indonesia umum
+  const m = String(str).match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+  if (m) {
+    let y = m[3];
+    if (y.length === 2) y = '20' + y;
+    return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  }
+  return '';
 }
 
 function renderResults() {

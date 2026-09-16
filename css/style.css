@@ -385,6 +385,9 @@ body {
 /* Progress */
 .progress-card {
   border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow);
+  position: relative;
+  z-index: 10;
 }
 
 .progress-header {
@@ -394,12 +397,18 @@ body {
   margin-bottom: 0.75rem;
 }
 
+.progress-header h2 {
+  color: var(--accent);
+  font-size: 1.15rem;
+}
+
 .progress-bar-wrap {
-  height: 8px;
+  height: 12px;
   background: var(--bg-elevated);
   border-radius: 999px;
   overflow: hidden;
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
 }
 
 .progress-bar {
@@ -407,12 +416,15 @@ body {
   width: 0%;
   background: linear-gradient(90deg, var(--accent), #34d399);
   border-radius: 999px;
-  transition: width 0.35s ease;
+  transition: width 0.25s ease;
+  min-width: 2px;
 }
 
 .progress-status {
-  font-size: 0.85rem;
-  color: var(--text-muted);
+  font-size: 0.9rem;
+  color: var(--text);
+  font-weight: 500;
+  min-height: 1.4em;
 }
 
 .mono {

@@ -18,10 +18,19 @@ export function getSupabase() {
 
 export async function signInWithGoogle() {
   if (!supabaseClient) throw new Error('Supabase belum dikonfigurasi');
+
+  // Gunakan origin + path saat ini agar tidak redirect ke localhost
+  const redirectTo = window.location.origin + (window.location.pathname || '/');
+  console.log('OAuth redirectTo:', redirectTo);
+
   const { data, error } = await supabaseClient.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: window.location.origin + window.location.pathname
+      redirectTo,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'select_account'
+      }
     }
   });
   if (error) throw error;

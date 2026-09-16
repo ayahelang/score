@@ -17,32 +17,44 @@ export async function fileToBase64(file) {
   });
 }
 
-export async function ocrWithGemini(file, apiKey, promptExtra = '') {
+export async function ocrWithGemini(file, apiKey, promptExtra = '', context = 'auto') {
   if (!apiKey) throw new Error('Gemini API Key belum diisi');
 
   const { base64, mime } = await fileToBase64(file);
 
-  const prompt = `Kamu adalah sistem OCR pintar untuk lembar jawaban siswa Indonesia.
-Ekstrak SEMUA informasi penting dari gambar ini dalam format JSON murni (tanpa markdown).
+  const prompt = `Kamu adalah sistem OCR + analisis dokumen pendidikan Indonesia yang sangat akurat.
 
-Struktur yang diinginkan:
+Analisis gambar/dokumen ini dan keluarkan HANYA JSON valid (tanpa markdown, tanpa penjelasan).
+
+Struktur JSON yang WAJIB diikuti:
 {
-  "nama": "nama siswa jika ada",
-  "kelas": "kelas jika ada",
+  "dokumen_tipe": "lembar_siswa" | "kunci_jawaban" | "modul_ajar" | "lembar_sudah_dinilai" | "lainnya",
+  "kepercayaan_kunci": 0-100,
+  "nama": "nama siswa jika ada, null jika tidak",
+  "sekolah": "nama sekolah jika terbaca, null jika tidak",
+  "kelas": "kelas jika ada, null jika tidak",
+  "tanggal": "tanggal ujian jika ada (format bebas), null jika tidak",
+  "mapel": "mata pelajaran jika ada, null jika tidak",
   "nomor_absen": "jika ada",
-  "tipe": "pg" atau "essay" atau "campuran",
+  "tipe_soal": "pg" | "essay" | "campuran",
   "jawaban": [
-    { "nomor": 1, "jawaban": "A" atau teks essay },
-    { "nomor": 2, "jawaban": "..." }
+    { "nomor": 1, "jawaban": "A atau teks jawaban", "benar": true/false/null }
   ],
-  "teks_soal": "jika ada redaksi soal yang terbaca",
-  "catatan": "info tambahan"
+  "teks_soal": "redaksi soal jika terbaca (bisa ringkas)",
+  "nilai_tertera": "nilai yang sudah ditulis guru (jika lembar sudah dinilai), null jika tidak",
+  "catatan": "info penting lain"
 }
 
-Jika ini adalah KUNCI JAWABAN, prioritaskan ekstrak nomor soal + jawaban benar.
+ATURAN PENTING untuk "kepercayaan_kunci" dan "dokumen_tipe":
+1. Jika ini LEMBAR JAWABAN SISWA YANG SUDAH DINILAI (ada nilai besar dilingkari, coretan pensil/pulpen guru, tapi TIDAK ada tanda ✓/✗ atau kunci yang jelas di setiap nomor) → dokumen_tipe = "lembar_sudah_dinilai", kepercayaan_kunci = 20-40. JANGAN anggap 100% sebagai kunci jawaban.
+2. Jika ini MODUL AJAR / BUKU / LEMBAR SOAL BERISI KUNCI JAWABAN yang jelas (ada daftar nomor + jawaban benar) → dokumen_tipe = "modul_ajar" atau "kunci_jawaban", kepercayaan_kunci = 90-100.
+3. Jika ini KUNCI JAWABAN murni (foto/ss kunci PG atau essay yang jelas) → kepercayaan_kunci = 85-100.
+4. Jika ini LEMBAR SISWA yang belum dinilai → dokumen_tipe = "lembar_siswa", kepercayaan_kunci = 0.
+5. Gabungkan informasi meta (sekolah, kelas, tanggal, mapel) sejauh yang terbaca.
+
 ${promptExtra}
 
-Hanya keluarkan JSON valid.`;
+Keluarkan HANYA JSON.`;
 
   const body = {
     contents: [{
@@ -58,7 +70,7 @@ Hanya keluarkan JSON valid.`;
     }],
     generationConfig: {
       temperature: 0.1,
-      maxOutputTokens: 4096
+      maxOutputTokens: 8192
     }
   };
 
@@ -121,8 +133,9 @@ function extractAnswersHeuristic(text) {
 
 /**
  * Proses file (image / pdf page) → OCR result
+ * context: 'key' | 'student' | 'auto'
  */
-export async function processFile(file, geminiKey, preferGemini = true) {
+export async function processFile(file, geminiKey, preferGemini = true, context = 'auto') {
   const isImage = file.type.startsWith('image/');
   if (!isImage && !file.type.includes('pdf')) {
     return { error: 'Tipe file tidak didukung untuk OCR langsung', file: file.name };
@@ -130,7 +143,12 @@ export async function processFile(file, geminiKey, preferGemini = true) {
 
   try {
     if (preferGemini && geminiKey) {
-      return await ocrWithGemini(file, geminiKey);
+      const extra = context === 'key'
+        ? 'Dokumen ini diupload sebagai KUNCI JAWABAN / referensi. Analisis apakah ini kunci murni, modul ajar, atau lembar siswa yang sudah dinilai.'
+        : context === 'student'
+        ? 'Dokumen ini diupload sebagai LEMBAR JAWABAN SISWA. Prioritaskan ekstrak nama siswa + jawaban per nomor.'
+        : '';
+      return await ocrWithGemini(file, geminiKey, extra, context);
     }
   } catch (e) {
     console.warn('Gemini gagal, fallback Tesseract', e.message);
