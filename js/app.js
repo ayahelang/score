@@ -1,5 +1,6 @@
 import { initSupabase, getSupabase, signInWithGoogle, signOut, getSession, onAuthStateChange } from './supabase.js';
-import { processFile, searchAnswerKeyOnline, gradeWithAI } from './ocr.js';
+import { gradeBatch } from './ocr.js';
+import { APP_CONFIG } from './config.js';
 import { scoreStudent, analyzeItems } from './scoring.js';
 import { exportToPDF, exportToExcel, exportAnalysisPDF } from './export.js';
 import { formatTime, extractFilesFromZip, saveConfig, loadConfig } from './utils.js';
@@ -32,16 +33,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupButtons();
   setupConfigModal();
 
-  const cfg = loadConfig();
-  state.config = cfg;
-  state.geminiKey = cfg.geminiKey || '';
-
-  if (cfg.supabaseUrl && cfg.supabaseKey) {
-    initSupabase(cfg.supabaseUrl, cfg.supabaseKey);
-    await checkAuth();
-  } else if (!cfg.skipped) {
-    $('#config-modal').classList.remove('hidden');
-  }
+  // Config publik — pengguna tidak perlu input Gemini key / localStorage rahasia
+  state.config = { supabaseUrl: APP_CONFIG.supabaseUrl, supabaseKey: APP_CONFIG.supabaseAnonKey };
+  state.geminiKey = '';
+  initSupabase(APP_CONFIG.supabaseUrl, APP_CONFIG.supabaseAnonKey);
+  await checkAuth();
+  $('#config-modal')?.classList.add('hidden');
 
   updateStartButton();
   setupFeedbackUI();
@@ -362,44 +359,56 @@ async function startScoring() {
   };
 
   try {
-    if (!state.geminiKey) {
-      throw new Error('Gemini API Key belum diisi. Buka setup (hapus localStorage config atau isi ulang) lalu masukkan API key.');
-    }
-
-    await setProgress(5, 'Menyiapkan file untuk AI guru...');
-    await setProgress(12, `Mengirim ${state.keyFiles.length} file soal/kunci + ${state.studentFiles.length} lembar siswa ke AI...`);
-    await setProgress(18, 'AI sedang membaca soal & lembar jawaban (seperti guru yg banting tulang hehe)...');
+    await setProgress(3, 'Menyiapkan batch penilaian (file demi file)...');
 
     const online = !!$('#online-key')?.checked;
-    const waitMsgs = [
-      { pct: 22, msg: 'AI membaca header & identitas siswa...' },
-      { pct: 28, msg: 'AI menelaah soal pilihan ganda...' },
-      { pct: 35, msg: 'AI mencocokkan jawaban PG siswa...' },
-      { pct: 42, msg: 'AI menilai jawaban essay (seperti guru yg banting tulang hehe)...' },
-      { pct: 50, msg: 'AI menyusun skor per butir soal...' },
-      { pct: 58, msg: 'Masih diproses — model gratis kadang antri di peak hours...' },
-      { pct: 65, msg: 'Hampir selesai, AI merapikan laporan nilai...' },
-      { pct: 72, msg: 'Finalisasi JSON hasil penilaian...' }
-    ];
-    let msgIdx = 0;
-    const heartbeat = setInterval(() => {
-      if (msgIdx < waitMsgs.length) {
-        const m = waitMsgs[msgIdx++];
-        setProgress(m.pct, m.msg);
-      } else {
-        setProgress(75, 'Masih menunggu respons AI (kuota gratis / jaringan)...');
-      }
-    }, 4000);
+    const keyN = state.keyFiles.length;
+    const stuN = state.studentFiles.length;
+    const mergedSiswa = [];
+    let mergedMeta = {};
+    let mergedMissing = [];
+    let lastRingkasan = '';
+    let usedModel = '';
 
-    let aiResult;
-    try {
-      aiResult = await gradeWithAI(state.keyFiles, state.studentFiles, state.geminiKey, {
-        onlineKey: online,
-        extra: 'Nilai secara adil. Untuk PG gunakan kunci atau pengetahuan mapel. Untuk essay nilai proporsional.'
-      });
-    } finally {
-      clearInterval(heartbeat);
+    // Strategi: proses 1 lembar siswa per request (+ semua kunci) agar JSON stabil
+    for (let i = 0; i < stuN; i++) {
+      const sf = state.studentFiles[i];
+      const basePct = 8 + Math.floor((i / Math.max(stuN, 1)) * 70);
+      await setProgress(basePct, `Memproses lembar siswa (${i + 1}/${stuN}): ${sf.name}`);
+      await setProgress(basePct + 2, `Mengirim kunci (${keyN} file) + ${sf.name} ke AI server...`);
+
+      const heartbeat = setInterval(() => {
+        setProgress(basePct + 4, `AI sedang menilai ${sf.name} (seperti guru yg banting tulang hehe)...`);
+      }, 5000);
+
+      let batchResult;
+      try {
+        batchResult = await gradeBatch(state.keyFiles, [sf], { onlineKey: online });
+      } finally {
+        clearInterval(heartbeat);
+      }
+
+      if (batchResult._usedModel) usedModel = batchResult._usedModel;
+      if (batchResult.meta) mergedMeta = { ...mergedMeta, ...batchResult.meta };
+      if (Array.isArray(batchResult.missing)) mergedMissing = [...new Set([...mergedMissing, ...batchResult.missing])];
+      if (batchResult.ringkasan) lastRingkasan = batchResult.ringkasan;
+      const list = Array.isArray(batchResult.siswa) ? batchResult.siswa : [];
+      for (const s of list) {
+        if (!s.file) s.file = sf.name;
+        mergedSiswa.push(s);
+      }
+      await setProgress(basePct + 8, `Selesai: ${sf.name} → ${list[0]?.nama || 'OK'} (nilai ${list[0]?.score ?? '-'})`);
     }
+
+    if (stuN === 0) throw new Error('Tidak ada lembar siswa');
+
+    const aiResult = {
+      meta: mergedMeta,
+      siswa: mergedSiswa,
+      missing: mergedMissing,
+      ringkasan: lastRingkasan || `Selesai ${mergedSiswa.length} siswa`,
+      _usedModel: usedModel
+    };
 
     await setProgress(82, 'Menyusun hasil penilaian...');
 

@@ -111,3 +111,24 @@ Dibuat untuk Teddy Mulyana / Silverhawk Network
 IT Coordinator • Depok, West Java
 
 Pertanyaan teknis? Hubungi via portal [silverhawk.web.id](https://silverhawk.web.id)
+
+## Deploy Edge Function (wajib untuk penilaian AI)
+
+API key Gemini **tidak** disimpan di browser. Simpan di Supabase:
+
+```bash
+# Install CLI: https://supabase.com/docs/guides/cli
+supabase login
+supabase link --project-ref lvvphyyoqekudwnffiyj
+supabase secrets set GEMINI_API_KEY=AIza_your_key_here
+supabase functions deploy grade
+```
+
+Atau di Dashboard: **Edge Functions** → create `grade` → paste isi `supabase/functions/grade/index.ts` → Secrets → `GEMINI_API_KEY`.
+
+Setelah deploy, URL: `https://lvvphyyoqekudwnffiyj.supabase.co/functions/v1/grade`
+
+## Batch penilaian
+
+Setiap lembar siswa diproses terpisah (bersama file kunci) agar respons AI tidak putus/JSON rusak.
+Progress menampilkan nama file yang sedang digarap.
