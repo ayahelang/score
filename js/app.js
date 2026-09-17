@@ -46,6 +46,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function setupFeedbackUI() {
+  $('#btn-feedback-mini')?.addEventListener('click', () => expandFeedbackModal());
+  document.getElementById('teddy-name-link')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const note = document.getElementById('teddy-note');
+    if (note) note.classList.toggle('hidden');
+  });
+
   $('#btn-like-app')?.addEventListener('click', () => {
     $('#feedback-step-1')?.classList.add('hidden');
     $('#feedback-step-2')?.classList.remove('hidden');
@@ -65,7 +72,13 @@ function setupFeedbackUI() {
     sessionStorage.setItem('sh_feedback_done', '1');
     $('#feedback-step-2')?.classList.add('hidden');
     $('#feedback-step-3')?.classList.remove('hidden');
+    sessionStorage.setItem('sh_feedback_submitted', '1');
     loadTestimonials();
+    setTimeout(() => {
+      $('#feedback-modal')?.classList.add('hidden');
+      shrinkFeedbackModal();
+      $('#feedback-modal')?.classList.add('hidden');
+    }, 1800);
   });
   $('#btn-close-feedback')?.addEventListener('click', () => {
     sessionStorage.setItem('sh_feedback_done', '1');
@@ -210,12 +223,45 @@ async function handleFiles(fileList, type) {
 function renderFileList(containerId, files, type) {
   const el = $(`#${containerId}`);
   if (!el) return;
-  el.innerHTML = files.map((f, i) => `
-    <div class="file-item">
-      <span class="name" title="${f.name}">${f.name}</span>
-      <button class="remove" data-type="${type}" data-idx="${i}">✕</button>
-    </div>
-  `).join('');
+  // revoke old urls
+  el.querySelectorAll('.file-thumb img').forEach(img => {
+    if (img.src && img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+  });
+
+  el.innerHTML = files.map((f, i) => {
+    const isImg = /\.(jpe?g|png|gif|webp)$/i.test(f.name) || (f.type || '').startsWith('image/');
+    const thumbId = `thumb-${type}-${i}`;
+    return `
+    <div class="file-item" data-idx="${i}">
+      <span class="name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+      <button type="button" class="remove" data-type="${type}" data-idx="${i}">✕</button>
+      <div class="file-thumb hidden" id="${thumbId}"></div>
+    </div>`;
+  }).join('');
+
+  files.forEach((f, i) => {
+    const item = el.querySelector(`.file-item[data-idx="${i}"]`);
+    const thumb = item?.querySelector('.file-thumb');
+    if (!item || !thumb) return;
+    const isImg = /\.(jpe?g|png|gif|webp)$/i.test(f.name) || (f.type || '').startsWith('image/');
+    item.addEventListener('mouseenter', () => {
+      thumb.classList.remove('hidden');
+      if (!thumb.dataset.ready) {
+        if (isImg) {
+          const url = URL.createObjectURL(f);
+          thumb.innerHTML = `<img src="${url}" alt="preview" />`;
+          thumb.dataset.ready = '1';
+        } else if (/\.pdf$/i.test(f.name)) {
+          thumb.innerHTML = `<div class="thumb-pdf">PDF</div>`;
+          thumb.dataset.ready = '1';
+        } else {
+          thumb.innerHTML = `<div class="thumb-pdf">FILE</div>`;
+          thumb.dataset.ready = '1';
+        }
+      }
+    });
+    item.addEventListener('mouseleave', () => thumb.classList.add('hidden'));
+  });
 
   el.querySelectorAll('.remove').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -236,6 +282,26 @@ function renderFileList(containerId, files, type) {
   });
 }
 
+function resetUploads() {
+  state.keyFiles = [];
+  state.studentFiles = [];
+  state.scored = [];
+  state.studentResults = [];
+  state.keyResults = [];
+  state.missingReport = [];
+  renderFileList('key-list', [], 'key');
+  renderFileList('student-list', [], 'student');
+  $('#key-count').textContent = '0 file';
+  $('#student-count').textContent = '0 file';
+  $('#results-section')?.classList.add('hidden');
+  $('#progress-section')?.classList.add('hidden');
+  $('#analysis-section')?.classList.add('hidden');
+  const list = $('#results-list');
+  if (list) list.innerHTML = '';
+  updateStartButton();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function updateStartButton() {
   const btn = $('#btn-start');
   const ready = state.keyFiles.length > 0 && state.studentFiles.length > 0 && !state.processing;
@@ -246,6 +312,13 @@ function updateStartButton() {
 }
 
 function setupButtons() {
+  $('#btn-reset')?.addEventListener('click', () => {
+    if (state.processing) return;
+    if (state.keyFiles.length || state.studentFiles.length || state.scored.length) {
+      if (!confirm('Kosongkan semua file upload & hasil?')) return;
+    }
+    resetUploads();
+  });
   $('#btn-login')?.addEventListener('click', async () => {
     try {
       await signInWithGoogle();
@@ -736,6 +809,7 @@ function renderResults() {
     header.addEventListener('click', (e) => {
       if (e.target.closest('.btn-toggle-soal')) return;
       header.parentElement.classList.toggle('open');
+      onStudentNameClick();
     });
   });
   list.querySelectorAll('.btn-toggle-soal').forEach(btn => {
@@ -749,13 +823,43 @@ function renderResults() {
   });
 }
 
+let studentClickCount = 0;
+
 function scheduleFeedbackModal() {
-  // Tampil ~2 detik setelah hasil
+  studentClickCount = 0;
+  const modal = $('#feedback-modal');
+  if (!modal || sessionStorage.getItem('sh_feedback_submitted')) return;
+  // Muncul penuh setelah 3 detik
   setTimeout(() => {
-    if (sessionStorage.getItem('sh_feedback_done')) return;
-    const modal = $('#feedback-modal');
-    if (modal) modal.classList.remove('hidden');
-  }, 2000);
+    modal.classList.remove('hidden', 'feedback-mini');
+    modal.classList.add('feedback-full');
+    // Setelah 2 detik mengecil ke kiri bawah
+    setTimeout(() => shrinkFeedbackModal(), 2000);
+  }, 3000);
+}
+
+function shrinkFeedbackModal() {
+  const modal = $('#feedback-modal');
+  if (!modal || sessionStorage.getItem('sh_feedback_submitted')) {
+    modal?.classList.add('hidden');
+    return;
+  }
+  modal.classList.remove('hidden', 'feedback-full');
+  modal.classList.add('feedback-mini');
+}
+
+function expandFeedbackModal() {
+  const modal = $('#feedback-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden', 'feedback-mini');
+  modal.classList.add('feedback-full');
+}
+
+function onStudentNameClick() {
+  studentClickCount++;
+  if (studentClickCount >= 2) {
+    expandFeedbackModal();
+  }
 }
 
 async function submitTestimonial(name, comment, liked) {

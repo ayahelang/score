@@ -123,6 +123,7 @@
 
       <!-- Action -->
       <div class="action-bar">
+        <button type="button" id="btn-reset" class="btn btn-ghost">↺ Reset upload</button>
         <button id="btn-start" class="btn btn-primary btn-lg" disabled>
           🚀 MULAI PENILAIAN
         </button>
@@ -200,8 +201,9 @@
 
   
   <!-- Feedback / Like modal -->
-  <div id="feedback-modal" class="modal hidden">
-    <div class="modal-content" style="max-width:440px">
+  <div id="feedback-modal" class="modal hidden feedback-full">
+    <button type="button" id="btn-feedback-mini" class="feedback-dock-btn" title="Komentar & traktir kopi">💬☕</button>
+    <div class="modal-content feedback-panel" style="max-width:440px">
       <div id="feedback-step-1">
         <h2>💙 Suka dengan Silverhawk Scoring?</h2>
         <p>Bantu kami dengan feedback singkat.</p>
@@ -226,7 +228,7 @@
           <button id="btn-skip-feedback" class="btn btn-ghost">Lewati</button>
         </div>
         <div class="support-box" style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border)">
-          <p style="font-weight:600;margin-bottom:0.5rem">☕ Traktir kopi ke Teddy Mulyana</p>
+          <p style="font-weight:600;margin-bottom:0.5rem">☕ Traktir kopi ke <a href="#" id="teddy-name-link" class="teddy-link">Teddy Mulyana</a></p>
           <p class="hint" style="margin-bottom:0.5rem">QRIS BNI (dummy — ganti nanti)</p>
           <div class="qris-dummy" id="qris-dummy" title="Ganti dengan QRIS asli">
             <svg width="140" height="140" viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg">
@@ -242,6 +244,7 @@
             GoPay: <strong>+6285158822803</strong><br/>
             Dana: <strong>+6285159922358</strong><br/>
             a.n. <strong>Teddy Mulyana</strong>
+          <p id="teddy-note" class="teddy-note hidden">Saat ini saya mengajar SMM di Pesantren Modern At-Taqwa</p>
           </p>
         </div>
       </div>
