@@ -37,6 +37,7 @@ export async function fileToBase64(file, compress = true) {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(bitmap, 0, 0, w, h);
     bitmap.close();
+    await new Promise(r => setTimeout(r, 0)); // yield agar timer UI jalan
     const dataUrl = canvas.toDataURL('image/jpeg', JPEG_Q);
     return { base64: dataUrl.split(',')[1], mime: 'image/jpeg', name };
   } catch (e) {

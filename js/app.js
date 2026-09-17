@@ -22,6 +22,66 @@ const state = {
   missingReport: []
 };
 
+
+/** Bunyi sukses singkat (Web Audio) — guru bisa dengar dari jauh */
+let _audioCtx = null;
+function playSuccessChime() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!_audioCtx) _audioCtx = new AC();
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    const ctx = _audioCtx;
+    const now = ctx.currentTime;
+    // Dua nada gembira naik
+    const notes = [523.25, 659.25, 783.99]; // C5 E5 G5
+    notes.forEach((freq, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(0.12, now + 0.02 + i * 0.08);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.28 + i * 0.08);
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.start(now + i * 0.08);
+      o.stop(now + 0.32 + i * 0.08);
+    });
+  } catch (_) {}
+}
+
+function playDoneFanfare() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!_audioCtx) _audioCtx = new AC();
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    const ctx = _audioCtx;
+    const now = ctx.currentTime;
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((freq, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'triangle';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(0.14, now + 0.03 + i * 0.1);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.45 + i * 0.1);
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.start(now + i * 0.1);
+      o.stop(now + 0.5 + i * 0.1);
+    });
+  } catch (_) {}
+}
+
+function tickElapsed() {
+  if (!state.startTime) return;
+  const el = document.getElementById('progress-elapsed');
+  if (el) el.textContent = formatTime((Date.now() - state.startTime) / 1000);
+}
+
 // DOM refs
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -413,11 +473,17 @@ async function startScoring() {
   progressSec.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
   state.startTime = Date.now();
-  state.timerInterval = setInterval(() => {
-    const elapsed = (Date.now() - state.startTime) / 1000;
-    const el = $('#progress-elapsed');
-    if (el) el.textContent = formatTime(elapsed);
-  }, 400);
+  tickElapsed();
+  // Interval rapat + Date.now() agar tidak "macet" saat proses berat
+  if (state.timerInterval) clearInterval(state.timerInterval);
+  state.timerInterval = setInterval(tickElapsed, 200);
+  // Cadangan: update juga lewat rAF saat tab aktif
+  const elapsedRaf = () => {
+    if (!state.processing) return;
+    tickElapsed();
+    state._elapsedRaf = requestAnimationFrame(elapsedRaf);
+  };
+  state._elapsedRaf = requestAnimationFrame(elapsedRaf);
 
   const progressLog = [];
   const logEl = $('#progress-log');
@@ -427,9 +493,13 @@ async function startScoring() {
     // kind: run | done | warn | err
     if (progressLog.length) {
       const last = progressLog[progressLog.length - 1];
-      if (last.kind === 'run') last.kind = 'done';
+      if (last.kind === 'run') {
+        last.kind = 'done';
+        playSuccessChime(); // bunyi tiap langkah selesai
+      }
     }
     progressLog.push({ status, kind, t: Date.now() });
+    tickElapsed();
     if (logEl) {
       logEl.innerHTML = progressLog.map((e, i) => {
         const icon = e.kind === 'done' ? '✅' : e.kind === 'warn' ? '⚠️' : e.kind === 'err' ? '❌' : '⏳';
@@ -671,7 +741,8 @@ async function startScoring() {
       state.missingReport.push('Hasil penilaian AI kosong – coba upload ulang atau periksa API key');
     }
 
-    await setProgress(100, aiResult.ringkasan || 'Selesai! Menampilkan hasil...');
+    await setProgress(100, aiResult.ringkasan || 'Selesai! Menampilkan hasil...', 'done');
+    playDoneFanfare();
     await new Promise(r => setTimeout(r, 500));
 
     renderResults();
@@ -685,6 +756,7 @@ async function startScoring() {
     alert('Terjadi kesalahan: ' + err.message);
   } finally {
     clearInterval(state.timerInterval);
+    if (state._elapsedRaf) cancelAnimationFrame(state._elapsedRaf);
     state.processing = false;
     updateStartButton();
   }
