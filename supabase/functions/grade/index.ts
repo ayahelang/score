@@ -1,8 +1,6 @@
-// Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@1";
 
-// Model aktif (Sept 2026)
 const MODELS = [
   "gemini-3.8-flash",
   "gemini-3.7-flash",
@@ -39,16 +37,13 @@ async function callGemini(apiKey: string, body: unknown) {
         errors.push(`${model}: ${res.status} ${raw.slice(0, 120)}`);
         continue;
       }
-      const data = JSON.parse(raw);
-      return { data, model };
+      return { data: JSON.parse(raw), model };
     } catch (e) {
       errors.push(`${model}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   throw new Error("Semua model gagal:\n" + errors.join("\n"));
 }
-
-console.info("grade function loaded");
 
 export default {
   fetch: withSupabase({ auth: ["publishable", "secret"] }, async (req, _ctx) => {
@@ -61,13 +56,11 @@ export default {
         },
       });
     }
-
     const cors = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
       "Content-Type": "application/json",
     };
-
     try {
       const apiKey = Deno.env.get("GEMINI_API_KEY");
       if (!apiKey) {
@@ -80,25 +73,45 @@ export default {
       const payload = await req.json();
       const keys = payload.keys || [];
       const students = payload.students || [];
-      if (!students.length) {
-        return Response.json({ error: "students kosong" }, { status: 400, headers: cors });
-      }
+      const mode = payload.mode || "grade";
+      const extra = payload.extra || "";
+      const keyText = payload.keyText || "";
 
       const parts: unknown[] = [];
-      const prompt = `Kamu guru multi-bahasa (dunia & daerah). Baca cetakan/tulisan tangan, foto miring/portrait/landscape. Jika tidak terbaca: nama="Tidak terbaca", score=0, isi missing. Nilai lembar siswa vs soal/kunci.
-Balas HANYA JSON valid:
-{"meta":{"sekolah":"","kelas":"","tanggal":"","mapel":""},"siswa":[{"nama":"","kelas":"","file":"","score":0,"pg":{"benar":0,"total":0,"persen":0,"items":[{"nomor":1,"soal":"","kunci":"","siswa":"","benar":true,"skor":100}]},"essay":{"skor_total":0,"skor_maks":100,"persen":0,"items":[{"nomor":1,"soal":"","kunci":"","siswa":"","benar":true,"skor":80}]}}],"missing":[],"ringkasan":""}
-Jika file kunci adalah soal (bukan kunci), gunakan pengetahuan guru.
-${payload.onlineKey ? "Gunakan second opinion pengetahuanmu." : ""}`;
+
+      // Prompt dasar orientasi + multi-bahasa
+      let prompt =
+        `Kamu guru multi-bahasa. Foto bisa miring, terbalik, upside-down, landscape/portrait — putar mental lalu baca.
+Tulisan tangan & cetakan. Jika tidak terbaca, laporkan jelas.
+${extra}\n`;
+
+      if (mode === "extract_key" || (keys.length && !students.length)) {
+        prompt += `Tugas: EKSTRAK kunci/soal dari gambar. Jangan nilai siswa.
+JSON:
+{"meta":{"sekolah":"","kelas":"","tanggal":"","mapel":""},"kunci_pg":[{"nomor":1,"soal":"","kunci":"A"}],"kunci_essay":[{"nomor":1,"soal":"","kunci":""}],"tidak_terbaca":[],"catatan":""}`;
+      } else if (mode === "grade_student" || keyText) {
+        prompt += `Tugas: NILAI 1 lembar siswa. Kunci sudah ada (teks).
+${keyText ? "KUNCI:\n" + keyText + "\n" : ""}
+JSON:
+{"meta":{"sekolah":"","kelas":"","tanggal":"","mapel":""},"siswa":[{"nama":"","kelas":"","file":"","score":0,"pg":{"benar":0,"total":0,"persen":0,"items":[{"nomor":1,"soal":"","kunci":"","siswa":"","benar":true,"skor":100}]},"essay":{"skor_total":0,"skor_maks":100,"persen":0,"items":[{"nomor":1,"soal":"","kunci":"","siswa":"","benar":true,"skor":80}]}}],"missing":[],"ringkasan":""}`;
+      } else {
+        prompt += `Tugas: nilai siswa vs kunci/soal.
+JSON:
+{"meta":{"sekolah":"","kelas":"","tanggal":"","mapel":""},"siswa":[{"nama":"","kelas":"","file":"","score":0,"pg":{"benar":0,"total":0,"persen":0,"items":[{"nomor":1,"soal":"","kunci":"","siswa":"","benar":true,"skor":100}]},"essay":{"skor_total":0,"skor_maks":100,"persen":0,"items":[{"nomor":1,"soal":"","kunci":"","siswa":"","benar":true,"skor":80}]}}],"missing":[],"ringkasan":""}`;
+      }
 
       parts.push({ text: prompt });
       for (const f of keys) {
-        parts.push({ text: `\n--- KUNCI/SOAL: ${f.name} ---\n` });
+        parts.push({ text: `\n--- FILE: ${f.name} ---\n` });
         parts.push({ inline_data: { mime_type: f.mime, data: f.base64 } });
       }
       for (const f of students) {
         parts.push({ text: `\n--- LEMBAR SISWA: ${f.name} ---\n` });
         parts.push({ inline_data: { mime_type: f.mime, data: f.base64 } });
+      }
+
+      if (!keys.length && !students.length) {
+        return Response.json({ error: "tidak ada file" }, { status: 400, headers: cors });
       }
 
       const body = {
@@ -115,14 +128,8 @@ ${payload.onlineKey ? "Gunakan second opinion pengetahuanmu." : ""}`;
       const parsed = parseJson(text) as Record<string, unknown>;
       parsed._usedModel = model;
 
-      if (!parsed.siswa && (parsed.data as { siswa?: unknown })?.siswa) {
+      if (!parsed.siswa && !parsed.kunci_pg && !parsed.kunci_essay && (parsed.data as Record<string, unknown>)?.siswa) {
         Object.assign(parsed, parsed.data);
-      }
-      if (!parsed.siswa) {
-        return Response.json(
-          { error: "parse_fail", model, raw: String(text).slice(0, 500) },
-          { status: 422, headers: cors },
-        );
       }
 
       return Response.json(parsed, { headers: cors });

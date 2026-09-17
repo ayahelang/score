@@ -1,5 +1,5 @@
 import { initSupabase, getSupabase, signInWithGoogle, signOut, getSession, onAuthStateChange } from './supabase.js';
-import { gradeBatch } from './ocr.js';
+import { extractKeys, gradeStudentWithKey } from './ocr.js';
 import { APP_CONFIG } from './config.js';
 import { scoreStudent, analyzeItems } from './scoring.js';
 import { exportToPDF, exportToExcel, exportAnalysisPDF } from './export.js';
@@ -432,37 +432,94 @@ async function startScoring() {
   };
 
   try {
-    await setProgress(3, 'Menyiapkan batch penilaian (file demi file)...');
-
     const online = !!$('#online-key')?.checked;
+    const customExtra = ($('#custom-prompt')?.value || '').trim();
     const keyN = state.keyFiles.length;
     const stuN = state.studentFiles.length;
+
+    const onProgress = async (msg) => {
+      await setProgress(null, msg); // keep pct, update text only if null
+    };
+
+    // setProgress: allow null pct to only update status
+    // (already defined above — patch via wrapper)
+    const setProg = async (pct, status) => {
+      if (pct == null) {
+        const statusEl = $('#progress-status');
+        if (statusEl) statusEl.textContent = status;
+        await new Promise(r => setTimeout(r, 30));
+      } else {
+        await setProgress(pct, status);
+      }
+    };
+
+    await setProg(5, `Fase 1/2: membaca ${keyN} file kunci/soal (bisa miring/terbalik)...`);
+
+    let keyData;
+    try {
+      keyData = await extractKeys(state.keyFiles, {
+        onlineKey: online,
+        extra: customExtra,
+        onProgress: async (msg) => setProg(12, msg)
+      });
+    } catch (e) {
+      throw new Error('Gagal ekstrak kunci: ' + e.message);
+    }
+
+    const pgN = (keyData.pg || []).length;
+    const esN = (keyData.essay || []).length;
+    await setProg(25, `Kunci siap: ${pgN} PG, ${esN} essay. Fase 2/2: nilai ${stuN} siswa...`);
+
+    if (keyData.meta) {
+      state.extractedMeta = {
+        school: keyData.meta.sekolah || null,
+        class: keyData.meta.kelas || null,
+        date: keyData.meta.tanggal || null,
+        room: keyData.meta.mapel || null
+      };
+      if (state.extractedMeta.school && !$('#meta-school').value) $('#meta-school').value = state.extractedMeta.school;
+      if (state.extractedMeta.class && !$('#meta-class').value) $('#meta-class').value = state.extractedMeta.class;
+      if (state.extractedMeta.room && !$('#meta-room').value) $('#meta-room').value = state.extractedMeta.room;
+    }
+
     const mergedSiswa = [];
-    let mergedMeta = {};
     let mergedMissing = [];
     let lastRingkasan = '';
-    let usedModel = '';
 
-    // Strategi: proses 1 lembar siswa per request (+ semua kunci) agar JSON stabil
     for (let i = 0; i < stuN; i++) {
       const sf = state.studentFiles[i];
-      const basePct = 8 + Math.floor((i / Math.max(stuN, 1)) * 70);
-      await setProgress(basePct, `Memproses lembar siswa (${i + 1}/${stuN}): ${sf.name}`);
-      await setProgress(basePct + 2, `Mengirim kunci (${keyN} file) + ${sf.name} ke AI server...`);
-
-      const heartbeat = setInterval(() => {
-        setProgress(basePct + 4, `AI sedang menilai ${sf.name} (seperti guru yg banting tulang hehe)...`);
-      }, 5000);
+      const basePct = 28 + Math.floor((i / Math.max(stuN, 1)) * 55);
+      await setProg(basePct, `Menilai (${i + 1}/${stuN}): ${sf.name}`);
 
       let batchResult;
       try {
-        batchResult = await gradeBatch(state.keyFiles, [sf], { onlineKey: online });
-      } finally {
-        clearInterval(heartbeat);
+        batchResult = await gradeStudentWithKey(sf, keyData, {
+          onlineKey: online,
+          extra: customExtra,
+          onProgress: async (msg) => setProg(basePct + 2, msg)
+        });
+      } catch (e) {
+        mergedMissing.push(`${sf.name}: ${e.message}`);
+        mergedSiswa.push({
+          nama: 'Gagal / Tidak terbaca',
+          kelas: '',
+          file: sf.name,
+          score: 0,
+          pg: { benar: 0, total: 0, persen: 0, items: [] },
+          essay: { skor_total: 0, skor_maks: 0, persen: 0, items: [] }
+        });
+        await setProg(basePct + 5, `Gagal: ${sf.name} — ${e.message.slice(0, 80)}`);
+        continue;
       }
 
-      if (batchResult._usedModel) usedModel = batchResult._usedModel;
-      if (batchResult.meta) mergedMeta = { ...mergedMeta, ...batchResult.meta };
+      if (batchResult.meta) {
+        state.extractedMeta = {
+          school: batchResult.meta.sekolah || state.extractedMeta.school,
+          class: batchResult.meta.kelas || state.extractedMeta.class,
+          date: batchResult.meta.tanggal || state.extractedMeta.date,
+          room: batchResult.meta.mapel || state.extractedMeta.room
+        };
+      }
       if (Array.isArray(batchResult.missing)) mergedMissing = [...new Set([...mergedMissing, ...batchResult.missing])];
       if (batchResult.ringkasan) lastRingkasan = batchResult.ringkasan;
       const list = Array.isArray(batchResult.siswa) ? batchResult.siswa : [];
@@ -470,17 +527,22 @@ async function startScoring() {
         if (!s.file) s.file = sf.name;
         mergedSiswa.push(s);
       }
-      await setProgress(basePct + 8, `Selesai: ${sf.name} → ${list[0]?.nama || 'OK'} (nilai ${list[0]?.score ?? '-'})`);
+      await setProg(basePct + 6, `Selesai: ${sf.name} → ${list[0]?.nama || 'OK'} (${list[0]?.score ?? '-'})`);
     }
 
     if (stuN === 0) throw new Error('Tidak ada lembar siswa');
 
     const aiResult = {
-      meta: mergedMeta,
+      meta: {
+        sekolah: state.extractedMeta.school,
+        kelas: state.extractedMeta.class,
+        tanggal: state.extractedMeta.date,
+        mapel: state.extractedMeta.room
+      },
       siswa: mergedSiswa,
       missing: mergedMissing,
       ringkasan: lastRingkasan || `Selesai ${mergedSiswa.length} siswa`,
-      _usedModel: usedModel
+      _usedModel: ''
     };
 
     await setProgress(82, 'Menyusun hasil penilaian...');
