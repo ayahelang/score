@@ -119,13 +119,19 @@ async function extractKeyFromPages(keyFiles, options = {}) {
       );
     }
 
-    const custom = options.extra ? `\nINSTRUKSI TAMBAHAN USER:\n${options.extra}\n` : '';
+    const custom = (options.extra ? `\nINSTRUKSI TAMBAHAN USER:\n${options.extra}\n` : '') + `\nATURAN BACA (selalu aktif meski user tidak isi instruksi tambahan):
+- Foto boleh miring, terbalik, upside-down, blur ringan, portrait/landscape — putar mental & baca sebaik mungkin.
+- Tulisan tangan, cetakan, atau campuran: transkrip apa adanya.
+- Multi-bahasa & bahasa daerah: jangan terjemahkan kecuali perlu nilai.
+- Soal bergambar / analisis gambar: deskripsikan elemen penting lalu nilai.
+- Jika halaman/file benar-benar tidak terbaca: tandai jelas, jangan mengarang.
+`;
     const payload = {
       mode: 'extract_key',
       keys: chunk,
       students: [],
       onlineKey: !!options.onlineKey,
-      extra: `Fase ekstrak KUNCI/SOAL saja. Foto bisa miring, terbalik, upside-down — putar mental dulu lalu baca.
+      extra: `Fase ekstrak KUNCI/SOAL saja. Foto bisa miring/terbalik/upside-down/blur, tulisan tangan+cetakan, multi-bahasa, soal bergambar — putar mental & baca. Jangan mengarang jika tak terbaca. Redaksi soal harus lengkap (bukan label pendek seperti imla1).
 ${custom}
 JSON:
 {"meta":{"sekolah":"","kelas":"","tanggal":"","mapel":""},"kunci_pg":[{"nomor":1,"soal":"redaksi singkat","kunci":"A"}],"kunci_essay":[{"nomor":1,"soal":"pertanyaan","kunci":"poin jawaban benar"}],"tidak_terbaca":[],"catatan":""}`
@@ -164,7 +170,13 @@ JSON:
  */
 async function gradeOneStudent(studentFile, keyData, options = {}) {
   const student = await fileToBase64(studentFile, true);
-  const custom = options.extra ? `\nINSTRUKSI TAMBAHAN USER:\n${options.extra}\n` : '';
+  const custom = (options.extra ? `\nINSTRUKSI TAMBAHAN USER:\n${options.extra}\n` : '') + `\nATURAN BACA (selalu aktif meski user tidak isi instruksi tambahan):
+- Foto boleh miring, terbalik, upside-down, blur ringan, portrait/landscape — putar mental & baca sebaik mungkin.
+- Tulisan tangan, cetakan, atau campuran: transkrip apa adanya.
+- Multi-bahasa & bahasa daerah: jangan terjemahkan kecuali perlu nilai.
+- Soal bergambar / analisis gambar: deskripsikan elemen penting lalu nilai.
+- Jika halaman/file benar-benar tidak terbaca: tandai jelas, jangan mengarang.
+`;
 
   const keyText = JSON.stringify({
     meta: keyData.meta,
@@ -178,7 +190,7 @@ async function gradeOneStudent(studentFile, keyData, options = {}) {
     students: [student],
     keyText,
     onlineKey: !!options.onlineKey,
-    extra: `Fase NILAI SISWA. Kunci sudah diekstrak (JSON di bawah). Foto siswa bisa miring/terbalik — putar mental dulu.
+    extra: `Fase NILAI SISWA. Kunci sudah diekstrak (JSON di bawah). Foto siswa bisa miring/terbalik/blur/tulisan tangan — putar mental. Isi field soal dengan redaksi lengkap dari kunci, bukan label pendek.
 Jika file tidak terbaca: nama="Tidak terbaca", score=0.
 ${custom}
 KUNCI_JSON:

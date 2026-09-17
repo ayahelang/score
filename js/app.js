@@ -75,9 +75,7 @@ function setupFeedbackUI() {
     sessionStorage.setItem('sh_feedback_submitted', '1');
     loadTestimonials();
     setTimeout(() => {
-      $('#feedback-modal')?.classList.add('hidden');
       shrinkFeedbackModal();
-      $('#feedback-modal')?.classList.add('hidden');
     }, 1800);
   });
   $('#btn-close-feedback')?.addEventListener('click', () => {
@@ -421,14 +419,35 @@ async function startScoring() {
     if (el) el.textContent = formatTime(elapsed);
   }, 400);
 
-  const setProgress = async (pct, status) => {
+  const progressLog = [];
+  const logEl = $('#progress-log');
+  if (logEl) logEl.innerHTML = '';
+
+  const appendLog = (status, kind = 'run') => {
+    // kind: run | done | warn | err
+    if (progressLog.length) {
+      const last = progressLog[progressLog.length - 1];
+      if (last.kind === 'run') last.kind = 'done';
+    }
+    progressLog.push({ status, kind, t: Date.now() });
+    if (logEl) {
+      logEl.innerHTML = progressLog.map((e, i) => {
+        const icon = e.kind === 'done' ? '✅' : e.kind === 'warn' ? '⚠️' : e.kind === 'err' ? '❌' : '⏳';
+        return `<div class="plog-item plog-${e.kind}"><span class="plog-icon">${icon}</span><span class="plog-text">${escapeHtml(e.status)}</span></div>`;
+      }).join('');
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  };
+
+  const setProgress = async (pct, status, kind = 'run') => {
     const bar = $('#progress-bar');
     const statusEl = $('#progress-status');
     const titleEl = $('#progress-title');
-    if (bar) bar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
-    if (statusEl) statusEl.textContent = status;
-    if (titleEl) titleEl.textContent = pct >= 100 ? 'Selesai!' : 'Sedang memproses...';
-    await new Promise(r => setTimeout(r, 40));
+    if (pct != null && bar) bar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+    if (statusEl && status) statusEl.textContent = status;
+    if (titleEl) titleEl.textContent = (pct != null && pct >= 100) ? 'Selesai!' : 'Sedang memproses...';
+    if (status) appendLog(status, kind);
+    await new Promise(r => setTimeout(r, 35));
   };
 
   try {
@@ -437,20 +456,8 @@ async function startScoring() {
     const keyN = state.keyFiles.length;
     const stuN = state.studentFiles.length;
 
-    const onProgress = async (msg) => {
-      await setProgress(null, msg); // keep pct, update text only if null
-    };
-
-    // setProgress: allow null pct to only update status
-    // (already defined above — patch via wrapper)
-    const setProg = async (pct, status) => {
-      if (pct == null) {
-        const statusEl = $('#progress-status');
-        if (statusEl) statusEl.textContent = status;
-        await new Promise(r => setTimeout(r, 30));
-      } else {
-        await setProgress(pct, status);
-      }
+    const setProg = async (pct, status, kind = 'run') => {
+      await setProgress(pct, status, kind);
     };
 
     await setProg(5, `Fase 1/2: membaca ${keyN} file kunci/soal (bisa miring/terbalik)...`);
@@ -531,6 +538,34 @@ async function startScoring() {
     }
 
     if (stuN === 0) throw new Error('Tidak ada lembar siswa');
+
+
+    // Lengkapi redaksi soal dari kunci jika AI hanya kasih label pendek
+    const soalMap = {};
+    (keyData.pg || []).forEach(k => { if (k.nomor != null) soalMap['pg:' + k.nomor] = k.soal || k.kunci || ''; });
+    (keyData.essay || []).forEach(k => { if (k.nomor != null) soalMap['es:' + k.nomor] = k.soal || k.kunci || ''; });
+    for (const s of mergedSiswa) {
+      if (s.pg?.items) {
+        s.pg.items = s.pg.items.map(it => {
+          let soal = (it.soal || '').trim();
+          if (!soal || soal.length < 12) {
+            const alt = soalMap['pg:' + it.nomor] || soalMap['pg:' + String(it.nomor)];
+            if (alt && alt.length > soal.length) soal = alt;
+          }
+          return { ...it, soal: soal || it.soal || '' };
+        });
+      }
+      if (s.essay?.items) {
+        s.essay.items = s.essay.items.map(it => {
+          let soal = (it.soal || '').trim();
+          if (!soal || soal.length < 12) {
+            const alt = soalMap['es:' + it.nomor] || soalMap['es:' + String(it.nomor)];
+            if (alt && alt.length > soal.length) soal = alt;
+          }
+          return { ...it, soal: soal || it.soal || '' };
+        });
+      }
+    }
 
     const aiResult = {
       meta: {
@@ -890,22 +925,25 @@ let studentClickCount = 0;
 function scheduleFeedbackModal() {
   studentClickCount = 0;
   const modal = $('#feedback-modal');
-  if (!modal || sessionStorage.getItem('sh_feedback_submitted')) return;
-  // Muncul penuh setelah 3 detik
+  if (!modal) return;
+  // Selalu siapkan dock; form penuh hanya jika belum submit
+  modal.classList.remove('hidden');
+  if (sessionStorage.getItem('sh_feedback_submitted')) {
+    modal.classList.remove('feedback-full');
+    modal.classList.add('feedback-mini');
+    return;
+  }
   setTimeout(() => {
     modal.classList.remove('hidden', 'feedback-mini');
     modal.classList.add('feedback-full');
-    // Setelah 2 detik mengecil ke kiri bawah
     setTimeout(() => shrinkFeedbackModal(), 2000);
   }, 3000);
 }
 
 function shrinkFeedbackModal() {
   const modal = $('#feedback-modal');
-  if (!modal || sessionStorage.getItem('sh_feedback_submitted')) {
-    modal?.classList.add('hidden');
-    return;
-  }
+  if (!modal) return;
+  // Setelah submit komentar: tetap floating mini, jangan hilang total
   modal.classList.remove('hidden', 'feedback-full');
   modal.classList.add('feedback-mini');
 }

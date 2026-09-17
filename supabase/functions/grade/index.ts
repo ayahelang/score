@@ -81,7 +81,7 @@ export default {
 
       // Prompt dasar orientasi + multi-bahasa
       let prompt =
-        `Kamu guru multi-bahasa. Foto bisa miring, terbalik, upside-down, landscape/portrait — putar mental lalu baca.
+        `Kamu guru multi-bahasa. Foto boleh miring/terbalik/upside-down/blur/landscape/portrait. Tulisan tangan+cetakan. Multi-bahasa. Soal bergambar: analisis gambar. Redaksi soal harus LENGKAP bukan label (hindari imla1). Jika tak terbaca laporkan jelas, jangan mengarang.
 Tulisan tangan & cetakan. Jika tidak terbaca, laporkan jelas.
 ${extra}\n`;
 

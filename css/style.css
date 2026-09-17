@@ -810,3 +810,96 @@ body {
   justify-content: center;
   align-items: center;
 }
+
+
+/* Progress log scrollable */
+.progress-log {
+  margin-top: 0.65rem;
+  max-height: 7.2em; /* ~3 baris */
+  overflow-y: auto;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.82rem;
+  scroll-behavior: smooth;
+}
+.plog-item {
+  display: flex;
+  gap: 0.45rem;
+  align-items: flex-start;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid transparent;
+}
+.plog-item:last-child { border-bottom: none; }
+.plog-icon { flex-shrink: 0; }
+.plog-text { color: var(--text-muted); line-height: 1.35; }
+.plog-done .plog-text { color: var(--text); }
+.plog-run .plog-text { color: var(--accent); font-weight: 500; }
+.plog-err .plog-text { color: #f87171; }
+.plog-warn .plog-text { color: var(--warning); }
+
+/* Thumbnail tidak terpotong */
+.file-list { overflow: visible; position: relative; z-index: 1; }
+.file-item { overflow: visible; z-index: 1; }
+.file-item:hover { z-index: 30; }
+.file-thumb {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  padding: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.4);
+  pointer-events: none;
+  overflow: visible;
+}
+.file-thumb img {
+  display: block;
+  max-width: 180px;
+  max-height: 180px;
+  width: auto;
+  height: auto;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+/* Feedback dock selalu bisa tampil */
+#feedback-modal.feedback-mini {
+  display: block !important;
+  background: transparent !important;
+  pointer-events: none;
+  z-index: 999;
+}
+#feedback-modal.feedback-mini .feedback-dock-btn {
+  display: flex !important;
+  pointer-events: auto;
+}
+#feedback-modal.hidden.feedback-mini {
+  display: block !important;
+}
+
+/* Compact traktir */
+.support-box {
+  font-size: 0.82rem;
+  margin-top: 0.75rem !important;
+  padding-top: 0.65rem !important;
+}
+.support-box .qris-dummy svg { width: 100px; height: 100px; }
+.support-box p { margin: 0.25rem 0; }
+
+/* Soal text more readable */
+.soal-text {
+  display: block;
+  margin-top: 0.35rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg-elevated);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.soal-text.hidden { display: none; }
