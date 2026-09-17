@@ -924,3 +924,19 @@ body {
   z-index: 9999 !important;
   pointer-events: none;
 }
+
+.kunci-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 0.2rem; }
+.kunci-text {
+  display: block;
+  margin-top: 0.2rem;
+  padding: 0.35rem 0.45rem;
+  background: var(--bg-elevated);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 220px;
+}
+.kunci-text.hidden { display: none; }
+.btn-toggle-kunci { font-weight: 700; font-size: 0.95rem; }

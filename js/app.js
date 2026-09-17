@@ -910,6 +910,27 @@ function resolveSoalText(it) {
   return soal || kunci || '(Redaksi soal tidak tersedia dari AI — lihat kolom Kunci / Jawaban)';
 }
 
+
+/** Tampilkan huruf kunci + teks lengkap (bisa di-expand) */
+function resolveKunciParts(it) {
+  const raw = String(it.kunci || '').trim();
+  const soal = resolveSoalText(it);
+  // Ambil huruf A-E di awal jika ada
+  const m = raw.match(/^([A-Ea-e])\b/);
+  const letter = m ? m[1].toUpperCase() : (raw.length <= 3 ? raw.toUpperCase() : '');
+  let full = raw;
+  // Jika hanya huruf, coba tarik opsi dari redaksi soal (A. ... B. ...)
+  if (letter && (raw.length <= 3 || raw === letter) && soal) {
+    const re = new RegExp(letter + '[\\.)\\]\\s]+([^\\n]+)', 'i');
+    const opt = soal.match(re);
+    if (opt) full = letter + '. ' + opt[1].trim();
+    else full = letter + (soal ? ' — lihat redaksi soal untuk opsi ' + letter : '');
+  }
+  if (!full) full = '(Kunci tidak tersedia)';
+  const shortLabel = letter || (raw.length <= 8 ? raw : raw.slice(0, 8) + '…');
+  return { short: shortLabel || '•', full };
+}
+
 function renderResults() {
   const list = $('#results-list');
   if (!list) return;
@@ -968,18 +989,23 @@ function renderResults() {
             <div class="detail-row detail-head">
               <span>No</span><span>Soal</span><span>Kunci</span><span>Jawaban Siswa</span><span>Nilai</span>
             </div>
-            ${pg.items.map(it => `
+            ${pg.items.map(it => {
+              const kp = resolveKunciParts(it);
+              return `
               <div class="detail-row">
                 <span class="qa-num">${escapeHtml(String(it.nomor))}</span>
                 <span class="soal-cell">
                   <button type="button" class="btn-link btn-toggle-soal">Lihat soal</button>
                   <span class="soal-text hidden" dir="auto">${escapeHtml(resolveSoalText(it))}</span>
                 </span>
-                <span dir="auto">${escapeHtml(String(it.kunci || '-'))}</span>
+                <span class="kunci-cell">
+                  <button type="button" class="btn-link btn-toggle-kunci" title="Lihat teks kunci">${escapeHtml(kp.short)}</button>
+                  <span class="kunci-text hidden" dir="auto">${escapeHtml(kp.full)}</span>
+                </span>
                 <span class="${it.benar ? 'qa-correct' : 'qa-wrong'}" dir="auto">${escapeHtml(String(it.siswa || '-'))}</span>
                 <span class="${it.benar ? 'qa-correct' : 'qa-wrong'}">${it.benar ? '✓' : '✗'} ${it.skor ?? (it.benar ? 100 : 0)}</span>
-              </div>
-            `).join('')}
+              </div>`;
+            }).join('')}
           </div>
         </div>`;
     }
@@ -1035,7 +1061,7 @@ function renderResults() {
 
   list.querySelectorAll('.result-header').forEach(header => {
     header.addEventListener('click', (e) => {
-      if (e.target.closest('.btn-toggle-soal')) return;
+      if (e.target.closest('.btn-toggle-soal') || e.target.closest('.btn-toggle-kunci')) return;
       header.parentElement.classList.toggle('open');
       onStudentNameClick();
     });
@@ -1047,6 +1073,15 @@ function renderResults() {
       if (!text) return;
       text.classList.toggle('hidden');
       btn.textContent = text.classList.contains('hidden') ? 'Lihat soal' : 'Sembunyikan soal';
+    });
+  });
+  list.querySelectorAll('.btn-toggle-kunci').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const box = btn.parentElement.querySelector('.kunci-text');
+      if (!box) return;
+      box.classList.toggle('hidden');
+      // biarkan label huruf tetap; teks kunci muncul di bawah
     });
   });
 }
