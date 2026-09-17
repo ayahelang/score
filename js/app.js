@@ -59,11 +59,11 @@ function setupFeedbackUI() {
   });
   $('#btn-dislike-app')?.addEventListener('click', () => {
     sessionStorage.setItem('sh_feedback_done', '1');
-    $('#feedback-modal')?.classList.add('hidden');
+    shrinkFeedbackModal();
   });
   $('#btn-skip-feedback')?.addEventListener('click', () => {
     sessionStorage.setItem('sh_feedback_done', '1');
-    $('#feedback-modal')?.classList.add('hidden');
+    shrinkFeedbackModal();
   });
   $('#btn-submit-testimonial')?.addEventListener('click', async () => {
     const name = $('#fb-name')?.value?.trim() || 'Anonim';
@@ -80,7 +80,7 @@ function setupFeedbackUI() {
   });
   $('#btn-close-feedback')?.addEventListener('click', () => {
     sessionStorage.setItem('sh_feedback_done', '1');
-    $('#feedback-modal')?.classList.add('hidden');
+    shrinkFeedbackModal();
   });
 }
 
@@ -548,21 +548,23 @@ async function startScoring() {
       if (s.pg?.items) {
         s.pg.items = s.pg.items.map(it => {
           let soal = (it.soal || '').trim();
-          if (!soal || soal.length < 12) {
-            const alt = soalMap['pg:' + it.nomor] || soalMap['pg:' + String(it.nomor)];
+          const alt = soalMap['pg:' + it.nomor] || soalMap['pg:' + String(it.nomor)] || '';
+          if (!soal || soal.length < 12 || /^(dikte|imla|soal)/i.test(soal)) {
             if (alt && alt.length > soal.length) soal = alt;
+            else if ((it.kunci || '').length > soal.length) soal = it.kunci;
           }
-          return { ...it, soal: soal || it.soal || '' };
+          return { ...it, soal: soal || it.soal || it.kunci || '' };
         });
       }
       if (s.essay?.items) {
         s.essay.items = s.essay.items.map(it => {
           let soal = (it.soal || '').trim();
-          if (!soal || soal.length < 12) {
-            const alt = soalMap['es:' + it.nomor] || soalMap['es:' + String(it.nomor)];
+          const alt = soalMap['es:' + it.nomor] || soalMap['es:' + String(it.nomor)] || '';
+          if (!soal || soal.length < 12 || /^(dikte|imla|soal|kalimat)/i.test(soal)) {
             if (alt && alt.length > soal.length) soal = alt;
+            else if ((it.kunci || '').length > soal.length) soal = it.kunci;
           }
-          return { ...it, soal: soal || it.soal || '' };
+          return { ...it, soal: soal || it.soal || it.kunci || '' };
         });
       }
     }
@@ -779,6 +781,30 @@ function tryParseDate(str) {
   return '';
 }
 
+
+/** Pilih teks soal yang bermakna (hindari label template Imla/Dikte/Soal N) */
+function resolveSoalText(it) {
+  const soal = (it.soal || '').trim();
+  const kunci = (it.kunci || '').trim();
+  const siswa = (it.siswa || '').trim();
+  const looksLikeLabel = (s) => {
+    if (!s) return true;
+    if (s.length < 8) return true;
+    // "Dikte (Imla) Kalimat 2", "Soal 1", "Imla 3", "PG-1"
+    if (/^(dikte|imla|soal|essay|pg|no\.?|nomor)(\s|\(|$)/i.test(s)) return true;
+    if (/^kalimat\s*\d+/i.test(s)) return true;
+    if (/^(soal|essay|pg)[\s\-_:]*\d+$/i.test(s)) return true;
+    // hanya angka / nomor
+    if (/^[\d\.\-\s]+$/.test(s)) return true;
+    return false;
+  };
+  if (!looksLikeLabel(soal)) return soal;
+  // Untuk imla/dikte, kunci = kalimat yang seharusnya
+  if (kunci && !looksLikeLabel(kunci) && kunci.length >= 4) return kunci;
+  if (siswa && !looksLikeLabel(siswa) && siswa.length >= 4) return siswa;
+  return soal || kunci || '(Redaksi soal tidak tersedia dari AI — lihat kolom Kunci / Jawaban)';
+}
+
 function renderResults() {
   const list = $('#results-list');
   if (!list) return;
@@ -842,7 +868,7 @@ function renderResults() {
                 <span class="qa-num">${escapeHtml(String(it.nomor))}</span>
                 <span class="soal-cell">
                   <button type="button" class="btn-link btn-toggle-soal">Lihat soal</button>
-                  <span class="soal-text hidden" dir="auto">${escapeHtml(it.soal || '(tidak ada redaksi)')}</span>
+                  <span class="soal-text hidden" dir="auto">${escapeHtml(resolveSoalText(it))}</span>
                 </span>
                 <span dir="auto">${escapeHtml(String(it.kunci || '-'))}</span>
                 <span class="${it.benar ? 'qa-correct' : 'qa-wrong'}" dir="auto">${escapeHtml(String(it.siswa || '-'))}</span>
@@ -866,7 +892,7 @@ function renderResults() {
                 <span class="qa-num">${escapeHtml(String(it.nomor))}</span>
                 <span class="soal-cell">
                   <button type="button" class="btn-link btn-toggle-soal">Lihat soal</button>
-                  <span class="soal-text hidden" dir="auto">${escapeHtml(it.soal || '(tidak ada redaksi)')}</span>
+                  <span class="soal-text hidden" dir="auto">${escapeHtml(resolveSoalText(it))}</span>
                 </span>
                 <span dir="auto">${escapeHtml(String(it.kunci || '-'))}</span>
                 <span dir="auto">${escapeHtml(String(it.siswa || '-'))}</span>
