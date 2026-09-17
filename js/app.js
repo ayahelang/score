@@ -36,17 +36,21 @@ function playSuccessChime() {
     // Dua nada gembira naik
     const notes = [523.25, 659.25, 783.99]; // C5 E5 G5
     notes.forEach((freq, i) => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = 'sine';
-      o.frequency.value = freq;
-      g.gain.setValueAtTime(0, now);
-      g.gain.linearRampToValueAtTime(0.12, now + 0.02 + i * 0.08);
-      g.gain.exponentialRampToValueAtTime(0.001, now + 0.28 + i * 0.08);
-      o.connect(g);
-      g.connect(ctx.destination);
-      o.start(now + i * 0.08);
-      o.stop(now + 0.32 + i * 0.08);
+      const t0 = now + i * 0.09;
+      [1, 2].forEach((mult, hi) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = hi ? 'triangle' : 'sine';
+        o.frequency.value = freq * mult;
+        const vol = hi ? 0.12 : 0.36;
+        g.gain.setValueAtTime(0, t0);
+        g.gain.linearRampToValueAtTime(vol, t0 + 0.025);
+        g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.35);
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.start(t0);
+        o.stop(t0 + 0.38);
+      });
     });
   } catch (_) {}
 }
@@ -66,7 +70,7 @@ function playDoneFanfare() {
       o.type = 'triangle';
       o.frequency.value = freq;
       g.gain.setValueAtTime(0, now);
-      g.gain.linearRampToValueAtTime(0.14, now + 0.03 + i * 0.1);
+      g.gain.linearRampToValueAtTime(0.38, now + 0.03 + i * 0.1);
       g.gain.exponentialRampToValueAtTime(0.001, now + 0.45 + i * 0.1);
       o.connect(g);
       g.connect(ctx.destination);
@@ -303,7 +307,6 @@ function renderFileList(containerId, files, type) {
     if (!item || !thumb) return;
     const isImg = /\.(jpe?g|png|gif|webp)$/i.test(f.name) || (f.type || '').startsWith('image/');
     item.addEventListener('mouseenter', () => {
-      thumb.classList.remove('hidden');
       if (!thumb.dataset.ready) {
         if (isImg) {
           const url = URL.createObjectURL(f);
@@ -317,8 +320,17 @@ function renderFileList(containerId, files, type) {
           thumb.dataset.ready = '1';
         }
       }
+      // fixed di viewport agar list tetap overflow:auto di dalam kartu
+      const rect = item.getBoundingClientRect();
+      thumb.classList.remove('hidden');
+      thumb.classList.add('file-thumb-fixed');
+      thumb.style.left = Math.min(rect.left, window.innerWidth - 200) + 'px';
+      thumb.style.top = Math.max(8, rect.top - 190) + 'px';
     });
-    item.addEventListener('mouseleave', () => thumb.classList.add('hidden'));
+    item.addEventListener('mouseleave', () => {
+      thumb.classList.add('hidden');
+      thumb.classList.remove('file-thumb-fixed');
+    });
   });
 
   el.querySelectorAll('.remove').forEach(btn => {
@@ -474,16 +486,32 @@ async function startScoring() {
 
   state.startTime = Date.now();
   tickElapsed();
-  // Interval rapat + Date.now() agar tidak "macet" saat proses berat
   if (state.timerInterval) clearInterval(state.timerInterval);
-  state.timerInterval = setInterval(tickElapsed, 200);
-  // Cadangan: update juga lewat rAF saat tab aktif
-  const elapsedRaf = () => {
-    if (!state.processing) return;
-    tickElapsed();
-    state._elapsedRaf = requestAnimationFrame(elapsedRaf);
-  };
-  state._elapsedRaf = requestAnimationFrame(elapsedRaf);
+  if (state._elapsedRaf) cancelAnimationFrame(state._elapsedRaf);
+  if (state._timerWorker) { try { state._timerWorker.terminate(); } catch(_){} state._timerWorker = null; }
+
+  // Worker terpisah: detak tetap jalan meski main thread sibuk kompres gambar
+  try {
+    const blob = new Blob([`
+      let t = null;
+      onmessage = (e) => {
+        if (e.data === 'start') {
+          if (t) clearInterval(t);
+          t = setInterval(() => postMessage('tick'), 250);
+        } else if (e.data === 'stop') {
+          if (t) clearInterval(t);
+          t = null;
+        }
+      };
+    `], { type: 'application/javascript' });
+    state._timerWorker = new Worker(URL.createObjectURL(blob));
+    state._timerWorker.onmessage = () => tickElapsed();
+    state._timerWorker.postMessage('start');
+  } catch (_) {
+    state.timerInterval = setInterval(tickElapsed, 250);
+  }
+  // Cadangan main-thread
+  state.timerInterval = setInterval(tickElapsed, 500);
 
   const progressLog = [];
   const logEl = $('#progress-log');
@@ -757,6 +785,11 @@ async function startScoring() {
   } finally {
     clearInterval(state.timerInterval);
     if (state._elapsedRaf) cancelAnimationFrame(state._elapsedRaf);
+    if (state._timerWorker) {
+      try { state._timerWorker.postMessage('stop'); state._timerWorker.terminate(); } catch(_){}
+      state._timerWorker = null;
+    }
+    tickElapsed();
     state.processing = false;
     updateStartButton();
   }

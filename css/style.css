@@ -903,3 +903,24 @@ body {
   word-break: break-word;
 }
 .soal-text.hidden { display: none; }
+
+
+/* List file tetap di dalam kartu */
+.file-list {
+  max-height: 220px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  position: relative;
+  z-index: 1;
+}
+.file-item {
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+.file-thumb-fixed {
+  position: fixed !important;
+  bottom: auto !important;
+  z-index: 9999 !important;
+  pointer-events: none;
+}

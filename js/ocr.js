@@ -26,6 +26,7 @@ export async function fileToBase64(file, compress = true) {
     });
   }
   try {
+    await new Promise(r => setTimeout(r, 0));
     const bitmap = await createImageBitmap(file);
     let w = bitmap.width, h = bitmap.height;
     const scale = Math.min(1, MAX_EDGE / Math.max(w, h));
