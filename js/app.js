@@ -1,6 +1,12 @@
 import { initSupabase, getSupabase, signInWithGoogle, signOut, getSession, onAuthStateChange } from './supabase.js';
 import { extractKeys, gradeStudentWithKey } from './ocr.js';
 import { APP_CONFIG } from './config.js';
+import { t, setLang, getLang, applyI18n } from './i18n.js';
+import {
+  PACKAGES, isAdminEmail, isSubscriptionActive, daysLeft,
+  subscribeWhatsAppUrl, voucherWhatsAppMessage, ensureProfile,
+  saveWaNumber, redeemVoucher, listProfilesForAdmin, createVoucherForUser
+} from './subscription.js';
 import { scoreStudent, analyzeItems } from './scoring.js';
 import { exportToPDF, exportToExcel, exportAnalysisPDF } from './export.js';
 import { formatTime, extractFilesFromZip, saveConfig, loadConfig } from './utils.js';
@@ -16,6 +22,9 @@ const state = {
   geminiKey: '',
   config: {},
   processing: false,
+  user: null,
+  profile: null,
+  pendingExport: null,
   startTime: 0,
   timerInterval: null,
   extractedMeta: { school: null, class: null, date: null, room: null },
@@ -96,8 +105,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupUploadZones();
   setupButtons();
   setupConfigModal();
+  setupI18nAndAccountUI();
 
-  // Config publik — pengguna tidak perlu input Gemini key / localStorage rahasia
   state.config = { supabaseUrl: APP_CONFIG.supabaseUrl, supabaseKey: APP_CONFIG.supabaseAnonKey };
   state.geminiKey = '';
   initSupabase(APP_CONFIG.supabaseUrl, APP_CONFIG.supabaseAnonKey);
@@ -107,6 +116,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateStartButton();
   setupFeedbackUI();
   loadTestimonials();
+  applyI18n();
 });
 
 function setupFeedbackUI() {
@@ -210,17 +220,35 @@ async function checkAuth() {
 }
 
 function updateAuthUI(session) {
+  const user = session?.user || null;
+  state.user = user;
   const loginBtn = $('#btn-login');
-  const userInfo = $('#user-info');
-  if (session?.user) {
+  const menu = $('#user-menu');
+  if (user) {
     loginBtn?.classList.add('hidden');
-    userInfo?.classList.remove('hidden');
-    $('#user-name').textContent = session.user.user_metadata?.full_name || session.user.email || 'User';
-    const avatar = session.user.user_metadata?.avatar_url;
-    if (avatar) $('#user-avatar').src = avatar;
+    menu?.classList.remove('hidden');
+    const name = user.user_metadata?.full_name || user.user_metadata?.name || user.email || 'User';
+    const av = user.user_metadata?.avatar_url || user.user_metadata?.picture || '';
+    if ($('#user-name')) $('#user-name').textContent = String(name).split(' ')[0];
+    const avEl = $('#user-avatar');
+    if (avEl) {
+      if (av) { avEl.src = av; avEl.classList.remove('hidden'); }
+      else avEl.classList.add('hidden');
+    }
+    ensureProfile(user).then(p => {
+      state.profile = p;
+      if (p?.is_admin || isAdminEmail(user.email)) {
+        $('#btn-open-admin')?.classList.remove('hidden');
+      } else {
+        $('#btn-open-admin')?.classList.add('hidden');
+      }
+      updateSubscriberUI();
+    }).catch(console.warn);
   } else {
     loginBtn?.classList.remove('hidden');
-    userInfo?.classList.add('hidden');
+    menu?.classList.add('hidden');
+    state.profile = null;
+    updateSubscriberUI();
   }
 }
 
@@ -404,14 +432,15 @@ function setupButtons() {
 
   $('#btn-start')?.addEventListener('click', startScoring);
 
-  $('#btn-export-pdf')?.addEventListener('click', () => {
-    const meta = getMeta();
-    exportToPDF(state.scored, meta);
-  });
-
-  $('#btn-export-excel')?.addEventListener('click', () => {
-    const meta = getMeta();
-    exportToExcel(state.scored, meta);
+  $('#btn-export-pdf')?.addEventListener('click', () => requestExport('pdf'));
+  $('#btn-export-excel')?.addEventListener('click', () => requestExport('excel'));
+  $('#btn-gen-soal')?.addEventListener('click', () => {
+    if (!isSubscriptionActive(state.profile)) {
+      alert('Fitur ini untuk pelanggan aktif. Buka Paket Langganan.');
+      $('#packages-modal')?.classList.remove('hidden');
+      return;
+    }
+    alert('Generate Soal A4: upload kisi-kisi / modul / foto soal di area Kunci, lalu fitur full akan memanggil AI. Versi awal: gunakan hasil kunci yang sudah diekstrak.');
   });
 
   $('#btn-analysis')?.addEventListener('click', () => {
@@ -1229,4 +1258,186 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function setupI18nAndAccountUI() {
+  const sel = $('#lang-select');
+  if (sel) {
+    sel.value = getLang();
+    sel.addEventListener('change', () => setLang(sel.value));
+  }
+
+  $('#btn-user-menu')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    $('#user-dropdown')?.classList.toggle('hidden');
+  });
+  document.addEventListener('click', () => $('#user-dropdown')?.classList.add('hidden'));
+
+  $('#btn-open-profile')?.addEventListener('click', () => openProfileModal());
+  $('#btn-open-packages')?.addEventListener('click', () => {
+    $('#packages-modal')?.classList.remove('hidden');
+  });
+  $('#btn-open-admin')?.addEventListener('click', () => openAdminPanel());
+  $('#btn-close-profile')?.addEventListener('click', () => $('#profile-modal')?.classList.add('hidden'));
+  $('#btn-close-packages')?.addEventListener('click', () => $('#packages-modal')?.classList.add('hidden'));
+  $('#btn-close-admin')?.addEventListener('click', () => $('#admin-modal')?.classList.add('hidden'));
+
+  $('#btn-save-profile')?.addEventListener('click', async () => {
+    if (!state.user) return alert('Login dulu');
+    const wa = $('#profile-wa')?.value?.trim() || '';
+    await saveWaNumber(state.user.id, wa);
+    if (state.profile) state.profile.wa_number = wa;
+    alert('Nomor WA disimpan');
+  });
+
+  $('#btn-redeem-voucher')?.addEventListener('click', async () => {
+    try {
+      if (!state.user) return alert('Login Google dulu');
+      const code = $('#profile-voucher')?.value || '';
+      const res = await redeemVoucher(state.user, code);
+      state.profile = await ensureProfile(state.user);
+      renderSubStatus();
+      updateSubscriberUI();
+      alert('Voucher aktif! Paket ' + res.package_code + ' — ' + res.days + ' hari.');
+    } catch (e) {
+      alert(e.message || String(e));
+    }
+  });
+
+  document.querySelectorAll('.btn-subscribe').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!state.user) {
+        alert('Silakan Login / Daftar Google dulu (kanan atas).');
+        return;
+      }
+      const pkg = btn.dataset.pkg || 'p1';
+      const name = state.profile?.full_name || state.user.user_metadata?.full_name || state.user.email;
+      window.open(subscribeWhatsAppUrl(pkg, name), '_blank');
+    });
+  });
+
+  $('#btn-export-gate-cancel')?.addEventListener('click', () => {
+    $('#export-gate-modal')?.classList.add('hidden');
+    state.pendingExport = null;
+  });
+  $('#btn-export-gate-ok')?.addEventListener('click', async () => {
+    const name = $('#export-name')?.value?.trim();
+    const comment = $('#export-comment')?.value?.trim();
+    if (!name || !comment) {
+      alert(t('needFeedback'));
+      return;
+    }
+    try { await submitTestimonial(name, comment, true); } catch (_) {}
+    $('#export-gate-modal')?.classList.add('hidden');
+    const kind = state.pendingExport;
+    state.pendingExport = null;
+    sessionStorage.setItem('sh_export_ok', '1');
+    if (kind === 'pdf') doExportPdf();
+    else if (kind === 'excel') doExportExcel();
+  });
+}
+
+function openProfileModal() {
+  if (!state.user) return alert('Login dulu');
+  if ($('#profile-wa')) $('#profile-wa').value = state.profile?.wa_number || '';
+  renderSubStatus();
+  $('#profile-modal')?.classList.remove('hidden');
+}
+
+function renderSubStatus() {
+  const box = $('#sub-status');
+  if (!box) return;
+  if (isSubscriptionActive(state.profile)) {
+    const pkg = PACKAGES[state.profile.package_code] || {};
+    const left = daysLeft(state.profile);
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <strong>✅ ${escapeHtml(pkg.name || state.profile.package_code)} aktif</strong>
+      <p>Sisa <strong>${left}</strong> hari (sampai ${new Date(state.profile.package_expires_at).toLocaleDateString('id-ID')})</p>
+      <ul>${(pkg.features || []).map(f => `<li>${escapeHtml(f)}</li>`).join('')}</ul>`;
+  } else {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+  }
+}
+
+function updateSubscriberUI() {
+  const gen = $('#btn-gen-soal');
+  if (gen) {
+    if (isSubscriptionActive(state.profile)) gen.classList.remove('hidden');
+    else gen.classList.add('hidden');
+  }
+}
+
+async function openAdminPanel() {
+  if (!state.user || !(state.profile?.is_admin || isAdminEmail(state.user.email))) {
+    return alert('Khusus admin');
+  }
+  const list = $('#admin-user-list');
+  if (!list) return;
+  list.innerHTML = '<p class="hint">Memuat...</p>';
+  $('#admin-modal')?.classList.remove('hidden');
+  const rows = await listProfilesForAdmin();
+  if (!rows.length) {
+    list.innerHTML = '<p class="hint">Belum ada user / RLS. Jalankan schema.sql terbaru di SQL Editor.</p>';
+    return;
+  }
+  list.innerHTML = rows.map(p => `
+    <div class="admin-user-row" data-id="${p.id}">
+      <div>
+        <strong>${escapeHtml(p.full_name || '-')}</strong>
+        <div class="hint">${escapeHtml(p.email || '')}</div>
+        <div class="hint">WA: ${escapeHtml(p.wa_number || '-')} · Paket: ${escapeHtml(p.package_code || '-')}</div>
+      </div>
+      <div class="admin-actions">
+        <button type="button" class="btn btn-sm btn-secondary btn-gen-v" data-pkg="p1" data-id="${p.id}">Voucher P1</button>
+        <button type="button" class="btn btn-sm btn-secondary btn-gen-v" data-pkg="p2" data-id="${p.id}">Voucher P2</button>
+      </div>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('.btn-gen-v').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const pkg = btn.dataset.pkg;
+      const profile = rows.find(r => r.id === id);
+      if (!profile) return;
+      try {
+        const v = await createVoucherForUser(state.user, profile, pkg);
+        let wa = profile.wa_number || '';
+        const custom = prompt('Nomor WA penerima (kosongkan = WA profil):', wa || '');
+        if (custom !== null) wa = custom;
+        const msg = voucherWhatsAppMessage(v.code, pkg, wa);
+        alert('Voucher: ' + v.code);
+        if (msg.url) window.open(msg.url, '_blank');
+        else prompt('Salin pesan:', msg.text);
+      } catch (e) {
+        alert('Gagal: ' + (e.message || e));
+      }
+    });
+  });
+}
+
+function requestExport(kind) {
+  if (!state.scored?.length) {
+    alert('Belum ada hasil untuk diunduh');
+    return;
+  }
+  if (sessionStorage.getItem('sh_export_ok')) {
+    if (kind === 'pdf') doExportPdf();
+    else doExportExcel();
+    return;
+  }
+  state.pendingExport = kind;
+  $('#export-gate-modal')?.classList.remove('hidden');
+}
+
+function doExportPdf() {
+  try { exportToPDF(state.scored, getMeta()); }
+  catch (e) { alert('Export PDF: ' + e.message); }
+}
+
+function doExportExcel() {
+  try { exportToExcel(state.scored, getMeta()); }
+  catch (e) { alert('Export Excel: ' + e.message); }
 }

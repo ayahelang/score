@@ -940,3 +940,76 @@ body {
 }
 .kunci-text.hidden { display: none; }
 .btn-toggle-kunci { font-weight: 700; font-size: 0.95rem; }
+
+/* Lang + user menu */
+.lang-switch select {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+}
+.user-menu { position: relative; }
+.user-chip {
+  display: flex; align-items: center; gap: 0.4rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem 0.2rem 0.25rem;
+  color: var(--text);
+  cursor: pointer;
+}
+.user-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
+.user-dropdown {
+  position: absolute; right: 0; top: calc(100% + 6px);
+  min-width: 180px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  z-index: 50;
+  padding: 0.35rem;
+  display: flex; flex-direction: column;
+}
+.user-dropdown.hidden { display: none; }
+.user-dropdown button {
+  background: transparent; border: none; color: var(--text);
+  text-align: left; padding: 0.55rem 0.75rem; border-radius: 8px; cursor: pointer;
+}
+.user-dropdown button:hover { background: var(--bg-elevated); }
+
+.pkg-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 640px) {
+  .pkg-grid { grid-template-columns: 1fr; }
+}
+.pkg-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  background: var(--bg-elevated);
+}
+.pkg-card ul { margin: 0.75rem 0 1rem; padding-left: 1.1rem; font-size: 0.88rem; color: var(--text-muted); }
+.pkg-card li { margin-bottom: 0.35rem; }
+
+.admin-user-list { max-height: 400px; overflow-y: auto; margin: 1rem 0; }
+.admin-user-row {
+  display: flex; justify-content: space-between; gap: 0.75rem; align-items: center;
+  padding: 0.75rem; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 0.5rem;
+  background: var(--bg-elevated);
+}
+.admin-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.sub-status {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  font-size: 0.9rem;
+}
+html[dir="rtl"] .header-inner { flex-direction: row-reverse; }
+html[dir="rtl"] .user-dropdown { right: auto; left: 0; }

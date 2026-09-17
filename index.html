@@ -33,14 +33,29 @@
             <p class="tagline">AI-Powered Answer Sheet Checker</p>
           </div>
         </div>
-        <div class="header-actions">
-          <button id="btn-theme" class="btn-icon" title="Toggle theme">🌓</button>
+                <div class="header-actions">
+          <div class="lang-switch" title="Language">
+            <select id="lang-select" aria-label="Language">
+              <option value="id">ID</option>
+              <option value="en">EN</option>
+              <option value="ar">AR</option>
+              <option value="fr">FR</option>
+            </select>
+          </div>
+          <button id="theme-toggle" class="btn-icon" title="Toggle theme">🌓</button>
           <div id="auth-area">
-            <button id="btn-login" class="btn btn-primary">Login Google</button>
-            <div id="user-info" class="user-info hidden">
-              <img id="user-avatar" src="" alt="" class="avatar" />
-              <span id="user-name"></span>
-              <button id="btn-logout" class="btn btn-ghost btn-sm">Logout</button>
+            <button id="btn-login" class="btn btn-primary" data-i18n="login">Login / Daftar</button>
+            <div id="user-menu" class="user-menu hidden">
+              <button type="button" id="btn-user-menu" class="user-chip">
+                <img id="user-avatar" class="user-avatar" alt="" />
+                <span id="user-name" class="user-name">User</span>
+              </button>
+              <div id="user-dropdown" class="user-dropdown hidden">
+                <button type="button" id="btn-open-profile" data-i18n="profile">Profil saya</button>
+                <button type="button" id="btn-open-packages" data-i18n="packages">Paket Langganan</button>
+                <button type="button" id="btn-open-admin" class="hidden" data-i18n="admin">Panel Admin</button>
+                <button type="button" id="btn-logout" data-i18n="logout">Keluar</button>
+              </div>
             </div>
           </div>
         </div>
@@ -144,6 +159,7 @@
           <div class="btn-group">
             <button id="btn-export-pdf" class="btn btn-secondary btn-sm">📄 PDF</button>
             <button id="btn-export-excel" class="btn btn-secondary btn-sm">📊 Excel</button>
+            <button id="btn-gen-soal" class="btn btn-secondary btn-sm hidden" data-i18n="genSoal">Generate Soal A4 PDF</button>
             <button id="btn-analysis" class="btn btn-secondary btn-sm">📈 Analisis Butir</button>
           </div>
         </div>
@@ -208,7 +224,90 @@
 
   
   <!-- Feedback / Like modal -->
-  <div id="feedback-modal" class="modal hidden feedback-full">
+  
+  <!-- Profile modal -->
+  <div id="profile-modal" class="modal hidden">
+    <div class="modal-content" style="max-width:480px">
+      <h2 data-i18n="profile">Profil saya</h2>
+      <div class="form-group">
+        <label data-i18n="wa">Nomor WhatsApp</label>
+        <input type="text" id="profile-wa" placeholder="+62812..." />
+      </div>
+      <div class="form-group">
+        <label data-i18n="voucher">Kode Voucher</label>
+        <div style="display:flex;gap:0.5rem">
+          <input type="text" id="profile-voucher" placeholder="SH-XXXX-XXXX" style="flex:1" />
+          <button type="button" id="btn-redeem-voucher" class="btn btn-primary" data-i18n="useVoucher">Gunakan Voucher</button>
+        </div>
+      </div>
+      <div id="sub-status" class="sub-status hidden"></div>
+      <div class="modal-actions">
+        <button type="button" id="btn-save-profile" class="btn btn-primary" data-i18n="save">Simpan</button>
+        <button type="button" id="btn-close-profile" class="btn btn-ghost">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Packages modal -->
+  <div id="packages-modal" class="modal hidden">
+    <div class="modal-content" style="max-width:640px">
+      <h2 data-i18n="packages">Paket Langganan</h2>
+      <div class="pkg-grid">
+        <div class="pkg-card">
+          <h3 data-i18n="pkg1">Paket 1 — Rp 30.000</h3>
+          <ul>
+            <li>Simpan data & hasil <strong>15 hari</strong></li>
+            <li>Akses admin SilverhawkCBT 15 hari<br><a href="https://cbt.silverhawk.web.id" target="_blank" rel="noopener">cbt.silverhawk.web.id</a></li>
+            <li>Generate Soal A4 PDF (25 PG + 5 Essay) + kunci</li>
+          </ul>
+          <button type="button" class="btn btn-primary btn-subscribe" data-pkg="p1" data-i18n="subscribe">Berlangganan</button>
+        </div>
+        <div class="pkg-card">
+          <h3 data-i18n="pkg2">Paket 2 — Rp 55.000</h3>
+          <ul>
+            <li>Simpan data & hasil <strong>30 hari</strong></li>
+            <li>Akses admin SilverhawkCBT 30 hari<br><a href="https://cbt.silverhawk.web.id" target="_blank" rel="noopener">cbt.silverhawk.web.id</a></li>
+            <li>Generate Soal A4 PDF (25 PG + 5 Essay) + kunci</li>
+          </ul>
+          <button type="button" class="btn btn-primary btn-subscribe" data-pkg="p2" data-i18n="subscribe">Berlangganan</button>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:1rem">Setelah transfer, admin akan kirim voucher ke WhatsApp Anda.</p>
+      <button type="button" id="btn-close-packages" class="btn btn-ghost">Tutup</button>
+    </div>
+  </div>
+
+  <!-- Admin modal -->
+  <div id="admin-modal" class="modal hidden">
+    <div class="modal-content" style="max-width:720px">
+      <h2 data-i18n="admin">Panel Admin</h2>
+      <p class="hint">Daftar pengguna Google. Generate & kirim voucher.</p>
+      <div id="admin-user-list" class="admin-user-list"></div>
+      <button type="button" id="btn-close-admin" class="btn btn-ghost">Tutup</button>
+    </div>
+  </div>
+
+  <!-- Gate export: nama + komentar -->
+  <div id="export-gate-modal" class="modal hidden">
+    <div class="modal-content" style="max-width:400px">
+      <h2>Sebelum unduh</h2>
+      <p class="hint" data-i18n="needFeedback">Isi nama & komentar dulu sebelum mengunduh hasil.</p>
+      <div class="form-group">
+        <label>Nama</label>
+        <input type="text" id="export-name" placeholder="Nama Anda" />
+      </div>
+      <div class="form-group">
+        <label>Komentar</label>
+        <textarea id="export-comment" rows="2" placeholder="Komentar singkat..."></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="btn-export-gate-ok" class="btn btn-primary">Lanjut unduh</button>
+        <button type="button" id="btn-export-gate-cancel" class="btn btn-ghost">Batal</button>
+      </div>
+    </div>
+  </div>
+
+<div id="feedback-modal" class="modal hidden feedback-full">
     <button type="button" id="btn-feedback-mini" class="feedback-dock-btn" title="Komentar & traktir kopi">💬☕</button>
     <div class="modal-content feedback-panel" style="max-width:440px">
       <div id="feedback-step-1">
@@ -264,6 +363,7 @@
   </div>
 
   <script type="module" src="js/app.js"></script>
+  <!-- i18n loaded from app -->
   <script src="https://silverhawk.web.id/lock/lock.js"></script>
 </body>
 </html>

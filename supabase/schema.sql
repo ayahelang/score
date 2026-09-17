@@ -1,32 +1,35 @@
--- Silverhawk Scoring – Supabase Schema (jalankan di SQL Editor)
--- Free tier compatible
-
--- Enable necessary extensions
+-- Silverhawk Scoring – Schema lengkap (jalankan di SQL Editor)
 create extension if not exists "uuid-ossp";
 
--- Users profile (optional, linked to auth.users)
+-- Profil user
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade primary key,
   email text,
   full_name text,
   avatar_url text,
-  is_subscriber boolean default false,
-  voucher_code text,
+  wa_number text,
+  is_admin boolean default false,
+  package_code text, -- 'p1' | 'p2' | null
+  package_expires_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
 
--- Vouchers
+-- Voucher per akun
 create table if not exists public.vouchers (
   id uuid default uuid_generate_v4() primary key,
   code text unique not null,
+  package_code text not null check (package_code in ('p1','p2')),
+  target_user_id uuid references auth.users,
+  target_email text,
+  days integer not null default 15,
   used_by uuid references auth.users,
   used_at timestamptz,
+  created_by uuid references auth.users,
   created_at timestamptz default now(),
   notes text
 );
 
--- Results (optional persistence)
 create table if not exists public.results (
   id uuid default uuid_generate_v4() primary key,
   user_id uuid references auth.users,
@@ -35,7 +38,6 @@ create table if not exists public.results (
   created_at timestamptz default now()
 );
 
--- Uploads metadata (untuk auto-clean)
 create table if not exists public.uploads (
   id uuid default uuid_generate_v4() primary key,
   user_id uuid references auth.users,
@@ -46,83 +48,93 @@ create table if not exists public.uploads (
   created_at timestamptz default now()
 );
 
--- Index for cleanup
-create index if not exists idx_uploads_created on public.uploads (created_at);
-create index if not exists idx_results_created on public.results (created_at);
-
--- RLS
-alter table public.profiles enable row level security;
-alter table public.vouchers enable row level security;
-alter table public.results enable row level security;
-alter table public.uploads enable row level security;
-
--- Policies (sederhana – sesuaikan sesuai kebutuhan)
-create policy "Users can view own profile"
-  on public.profiles for select using (auth.uid() = id);
-
-create policy "Users can update own profile"
-  on public.profiles for update using (auth.uid() = id);
-
-create policy "Users can insert own results"
-  on public.results for insert with check (auth.uid() = user_id);
-
-create policy "Users can view own results"
-  on public.results for select using (auth.uid() = user_id);
-
--- Storage buckets (buat manual di Dashboard → Storage)
--- 1. answer-keys (public atau private)
--- 2. student-sheets
--- Policy contoh untuk bucket private:
--- allow authenticated upload, only owner read, auto expire via Edge Function
-
--- Auto-clean function (panggil via Edge Function + cron / pg_cron)
--- Hapus data uploads + results yang lebih dari 7 hari
--- KECUALI user yang is_subscriber = true
-
-/*
-Contoh Edge Function (Deno) – create di supabase/functions/cleanup
-
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-
-Deno.serve(async () => {
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  )
-
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-
-  // Hapus results non-subscriber lama
-  await supabase
-    .from('results')
-    .delete()
-    .lt('created_at', sevenDaysAgo)
-    .not('user_id', 'in', 
-      supabase.from('profiles').select('id').eq('is_subscriber', true)
-    )
-
-  // Hapus file storage lama (perlu list dulu)
-  // ... implementasi list + remove
-
-  return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
-})
-*/
-
--- Testimonials (publik)
 create table if not exists public.testimonials (
   id uuid default uuid_generate_v4() primary key,
   name text,
   comment text,
   liked boolean default true,
+  user_id uuid references auth.users,
   created_at timestamptz default now()
 );
 
+create index if not exists idx_uploads_created on public.uploads (created_at);
+create index if not exists idx_results_created on public.results (created_at);
+create index if not exists idx_vouchers_code on public.vouchers (code);
+create index if not exists idx_profiles_email on public.profiles (email);
+
+alter table public.profiles enable row level security;
+alter table public.vouchers enable row level security;
+alter table public.results enable row level security;
+alter table public.uploads enable row level security;
 alter table public.testimonials enable row level security;
 
--- Siapa pun bisa baca testimoni
-create policy "Public read testimonials"
-  on public.testimonials for select using (true);
+-- Profiles
+drop policy if exists "Users can view own profile" on public.profiles;
+drop policy if exists "Users can update own profile" on public.profiles;
+drop policy if exists "Users can insert own profile" on public.profiles;
+drop policy if exists "Admin can view all profiles" on public.profiles;
 
--- Siapa pun bisa insert (tanpa login) — batasi abuse di production jika perlu
-create policy "Public insert testimonials"
-  on public.testimonials for insert with check (true);
+create policy "Users can view own profile"
+  on public.profiles for select using (auth.uid() = id OR email = 'admin@silverhawk.web.id');
+create policy "Users can update own profile"
+  on public.profiles for update using (auth.uid() = id);
+create policy "Users can insert own profile"
+  on public.profiles for insert with check (auth.uid() = id);
+create policy "Admin full profiles"
+  on public.profiles for all using (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and (p.is_admin = true or p.email = 'admin@silverhawk.web.id'))
+  );
+
+-- Vouchers: user lihat voucher untuk dirinya; admin full
+drop policy if exists "Users view own vouchers" on public.vouchers;
+drop policy if exists "Admin vouchers" on public.vouchers;
+create policy "Users view own vouchers"
+  on public.vouchers for select using (
+    target_user_id = auth.uid() OR used_by = auth.uid() OR
+    exists (select 1 from public.profiles p where p.id = auth.uid() and (p.is_admin or p.email = 'admin@silverhawk.web.id'))
+  );
+create policy "Admin manage vouchers"
+  on public.vouchers for all using (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and (p.is_admin or p.email = 'admin@silverhawk.web.id'))
+  );
+
+-- Results / uploads
+drop policy if exists "Users can insert own results" on public.results;
+drop policy if exists "Users can view own results" on public.results;
+create policy "Users can insert own results"
+  on public.results for insert with check (auth.uid() = user_id);
+create policy "Users can view own results"
+  on public.results for select using (auth.uid() = user_id);
+
+-- Testimonials public read
+drop policy if exists "Public read testimonials" on public.testimonials;
+drop policy if exists "Anyone insert testimonials" on public.testimonials;
+create policy "Public read testimonials" on public.testimonials for select using (true);
+create policy "Anyone insert testimonials" on public.testimonials for insert with check (true);
+
+-- Trigger: buat profile otomatis saat signup
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, email, full_name, avatar_url, is_admin)
+  values (
+    new.id,
+    new.email,
+    coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', ''),
+    coalesce(new.raw_user_meta_data->>'avatar_url', new.raw_user_meta_data->>'picture', ''),
+    lower(new.email) = 'admin@silverhawk.web.id'
+  )
+  on conflict (id) do update set
+    email = excluded.email,
+    full_name = coalesce(excluded.full_name, public.profiles.full_name),
+    avatar_url = coalesce(excluded.avatar_url, public.profiles.avatar_url),
+    is_admin = (lower(excluded.email) = 'admin@silverhawk.web.id'),
+    updated_at = now();
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
