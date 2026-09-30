@@ -696,13 +696,7 @@ body {
   line-height: 1.45;
   font-style: italic;
 }
-.qris-dummy {
-  display: inline-block;
-  padding: 0.5rem;
-  background: #fff;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-}
+
 .support-box { font-size: 0.9rem; }
 
 @media (max-width: 640px) {
@@ -887,7 +881,7 @@ body {
   margin-top: 0.75rem !important;
   padding-top: 0.65rem !important;
 }
-.support-box .qris-dummy svg { width: 100px; height: 100px; }
+
 .support-box p { margin: 0.25rem 0; }
 
 /* Soal text more readable */
@@ -1013,3 +1007,85 @@ body {
 }
 html[dir="rtl"] .header-inner { flex-direction: row-reverse; }
 html[dir="rtl"] .user-dropdown { right: auto; left: 0; }
+
+
+/* ===== Traktir kopi / QRIS – fluid & responsive ===== */
+.support-box {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 0.85rem;
+}
+.support-title {
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+  color: var(--text);
+}
+.support-sub {
+  margin: 0 0 0.65rem;
+  font-size: 0.78rem;
+}
+.qris-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0 auto 0.65rem;
+  padding: 0.55rem;
+  max-width: min(220px, 72vw);
+  width: 100%;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+}
+.qris-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 200px;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.support-pay {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  align-items: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.pay-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.pay-label {
+  display: inline-block;
+  min-width: 3.2rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  opacity: 0.9;
+}
+.support-pay strong {
+  color: var(--text);
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
+@media (max-width: 480px) {
+  .qris-wrap {
+    max-width: min(180px, 68vw);
+    padding: 0.4rem;
+  }
+  .qris-img { max-width: 160px; }
+}
+
+@media (min-width: 640px) {
+  .qris-wrap { max-width: 200px; }
+}
